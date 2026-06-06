@@ -1,13 +1,16 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Super Taikyu live timing fetcher."""
 
 from __future__ import annotations
 
 import argparse
 import csv
+import functools
 import html
+import http.server
 import json
 import sys
+import threading
 import time
 import webbrowser
 from dataclasses import asdict, dataclass
@@ -22,8 +25,16 @@ BASE_URL = "https://www.supertaikyu.live/json"
 DEFAULT_CLASS = "ST-5F"
 DEFAULT_INTERVAL = 5
 DEFAULT_OUTPUT_DIR = APP_DIR / "data"
+DEFAULT_HTTP_PORT = 8765
 REQUEST_TIMEOUT = 10
 MAX_RETRIES = 3
+
+TEAM_NAME = "AndLegal Racing"
+TEAM_TAGLINE = "ONE LAP AHEAD — ともに先へ"
+TEAM_X_URL = "https://x.com/AndLegal_Racing"
+TEAM_CAR_NOS = ("821", "822")
+TEAM_LOGO_ASSET = "../assets/team-logo.jpg"
+TEAM_BANNER_ASSET = "../assets/team-banner.jpg"
 
 ALL_CLASSES = [
     "ST-X",
@@ -74,6 +85,280 @@ class DriverRow:
     pos: str
     pic: str
     laps: str
+
+
+@dataclass
+class LapHistoryEntry:
+    car_no: str
+    car_class: str
+    driver_slot: str
+    driver_name: str
+    lap_no: int
+    lap_time_ms: int
+    lap_time: str
+    recorded_at: str
+
+
+def class_label_for(class_filter: str | None) -> str:
+    return class_filter or "ALL"
+
+
+def filter_rows_by_class(rows: list[TimingRow], class_filter: str | None) -> list[TimingRow]:
+    if not class_filter:
+        return rows
+    return [row for row in rows if row.car_class == class_filter]
+
+
+def collect_available_classes(
+    rows: list[TimingRow],
+    driver_rows: list[DriverRow],
+    lap_history: list[dict[str, Any]],
+) -> list[str]:
+    classes: set[str] = set()
+    for row in rows:
+        if row.car_class and row.car_class != "-":
+            classes.add(row.car_class)
+    for row in driver_rows:
+        if row.car_class and row.car_class != "-":
+            classes.add(row.car_class)
+    for lap in lap_history:
+        car_class = str(lap.get("car_class", "")).strip()
+        if car_class and car_class != "-":
+            classes.add(car_class)
+
+    ordered = [cls for cls in ALL_CLASSES if cls in classes]
+    for cls in sorted(classes):
+        if cls not in ordered:
+            ordered.append(cls)
+    return ordered
+
+
+def read_json_file(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def write_json_file(path: Path, payload: dict[str, Any]) -> None:
+    ensure_output_dir(path.parent)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def latest_json_path(output_dir: Path) -> Path:
+    return output_dir / "latest.json"
+
+
+def latest_csv_path(output_dir: Path) -> Path:
+    return output_dir / "latest.csv"
+
+
+def history_csv_path(output_dir: Path) -> Path:
+    return output_dir / "history.csv"
+
+
+def lap_history_path(output_dir: Path) -> Path:
+    return output_dir / "lap_history.json"
+
+
+def lap_state_path(output_dir: Path) -> Path:
+    return output_dir / "lap_state.json"
+
+
+def view_data_path(output_dir: Path) -> Path:
+    return output_dir / "view_data.json"
+
+
+def warehouse_dir(output_dir: Path) -> Path:
+    return output_dir / "warehouse"
+
+
+def raw_snapshots_csv_path(output_dir: Path) -> Path:
+    return warehouse_dir(output_dir) / "raw_snapshots.csv"
+
+
+def drivers_running_csv_path(output_dir: Path) -> Path:
+    return warehouse_dir(output_dir) / "drivers_running.csv"
+
+
+def live_xlsx_path(output_dir: Path) -> Path:
+    return output_dir / "timing_live.xlsx"
+
+
+def make_lap_entry(
+    car_no: str,
+    car_class: str,
+    driver_slot: str,
+    driver_name: str,
+    lap_no: int,
+    lap_time_ms: int,
+    recorded_at: str | None = None,
+) -> dict[str, Any]:
+    return asdict(
+        LapHistoryEntry(
+            car_no=car_no,
+            car_class=car_class,
+            driver_slot=driver_slot,
+            driver_name=driver_name,
+            lap_no=lap_no,
+            lap_time_ms=lap_time_ms,
+            lap_time=ms_to_laptime(lap_time_ms),
+            recorded_at=recorded_at or datetime.now().isoformat(timespec="seconds"),
+        )
+    )
+
+
+def bootstrap_lap_history_for_car(
+    history_laps: list[dict[str, Any]],
+    existing_keys: set[tuple[str, int]],
+    car_no: str,
+    car_class: str,
+    laps: int,
+    driver_slot: str,
+    driver_name: str,
+    lap_history_10: list[Any],
+) -> None:
+    if laps <= 0 or not lap_history_10:
+        return
+
+    valid_times = [int(value or 0) for value in lap_history_10 if int(value or 0) > 0]
+    if not valid_times:
+        return
+
+    start_lap = max(1, laps - len(lap_history_10) + 1)
+    for index, lap_time_ms in enumerate(lap_history_10):
+        lap_time_ms = int(lap_time_ms or 0)
+        if lap_time_ms <= 0:
+            continue
+
+        lap_no = start_lap + index
+        if lap_no <= 0 or lap_no > laps:
+            continue
+
+        key = (car_no, lap_no)
+        if key in existing_keys:
+            continue
+
+        history_laps.append(
+            make_lap_entry(
+                car_no, car_class, driver_slot, driver_name, lap_no, lap_time_ms
+            )
+        )
+        existing_keys.add(key)
+
+
+def update_lap_history(
+    output_dir: Path,
+    master: dict[str, Any],
+    live: dict[str, Any],
+    use_english: bool = False,
+) -> Path:
+    entry_info: dict[str, Any] = master.get("EntryInfo", {})
+    lap_history_10_data: dict[str, Any] = live.get("LapHistory10Data", {})
+    history_path = lap_history_path(output_dir)
+    state_path = lap_state_path(output_dir)
+
+    history_doc = read_json_file(history_path)
+    history_laps: list[dict[str, Any]] = list(history_doc.get("laps", []))
+    state: dict[str, Any] = dict(read_json_file(state_path))
+    existing_keys = {(lap["car_no"], int(lap["lap_no"])) for lap in history_laps}
+
+    for live_row in live.get("LiveData", []):
+        car_no = str(live_row.get("CarNo", "")).strip()
+        entry = entry_info.get(car_no)
+        if not entry:
+            continue
+
+        car_class = str(entry.get("ClassStr", "")).strip() or "-"
+        laps = int(live_row.get("LAPS", 0) or 0)
+        lap_time_ms = int(live_row.get("LapTime", 0) or 0)
+        driver_slot = str(live_row.get("Driver", "")).strip()
+        driver_name = get_driver_name(entry, driver_slot, use_english) or driver_slot or "-"
+        prev = state.get(car_no)
+
+        if prev is None:
+            bootstrap_lap_history_for_car(
+                history_laps,
+                existing_keys,
+                car_no,
+                car_class,
+                laps,
+                driver_slot,
+                driver_name,
+                list(lap_history_10_data.get(car_no, [])),
+            )
+
+        if laps > 0 and lap_time_ms > 0:
+            key = (car_no, laps)
+            if key not in existing_keys:
+                history_laps.append(
+                    make_lap_entry(
+                        car_no,
+                        car_class,
+                        driver_slot,
+                        driver_name,
+                        laps,
+                        lap_time_ms,
+                    )
+                )
+                existing_keys.add(key)
+            else:
+                for lap in history_laps:
+                    if lap["car_no"] == car_no and int(lap["lap_no"]) == laps:
+                        if int(lap["lap_time_ms"]) != lap_time_ms:
+                            lap["lap_time_ms"] = lap_time_ms
+                            lap["lap_time"] = ms_to_laptime(lap_time_ms)
+                            lap["recorded_at"] = datetime.now().isoformat(timespec="seconds")
+                        if not lap.get("car_class") or lap["car_class"] == "-":
+                            lap["car_class"] = car_class
+                        break
+
+        state[car_no] = {
+            "laps": laps,
+            "lap_time_ms": lap_time_ms,
+            "driver_slot": driver_slot,
+            "car_class": car_class,
+        }
+
+    history_laps.sort(key=lambda lap: (lap.get("car_class", ""), lap["car_no"], int(lap["lap_no"])))
+    payload = {
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "laps": history_laps,
+    }
+    write_json_file(history_path, payload)
+    write_json_file(state_path, state)
+    return history_path
+
+
+def save_view_data_json(
+    output_dir: Path,
+    rows: list[TimingRow],
+    driver_rows: list[DriverRow],
+    master: dict[str, Any],
+    live: dict[str, Any],
+    interval: int,
+    default_class: str,
+) -> Path:
+    history_doc = read_json_file(lap_history_path(output_dir))
+    lap_history = history_doc.get("laps", [])
+    payload = {
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "update_time_display": format_update_time(live.get("UpdateTime", "")),
+        "status": race_status_text(live),
+        "race_name": master.get("RaceNameL", ""),
+        "race_year": master.get("RaceYear", ""),
+        "default_class": default_class,
+        "classes": collect_available_classes(rows, driver_rows, lap_history),
+        "interval": interval,
+        "cars": [asdict(row) for row in rows],
+        "drivers": [asdict(row) for row in driver_rows],
+        "lap_history": lap_history,
+    }
+    path = view_data_path(output_dir)
+    write_json_file(path, payload)
+    return path
 
 
 def ms_to_laptime(ms: int | float | str) -> str:
@@ -391,9 +676,7 @@ def build_snapshot(
     rows: list[TimingRow],
     master: dict[str, Any],
     live: dict[str, Any],
-    class_filter: str | None,
 ) -> dict[str, Any]:
-    class_label = class_filter or "ALL"
     return {
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "race_name": master.get("RaceNameL", ""),
@@ -402,7 +685,6 @@ def build_snapshot(
         "update_time": live.get("UpdateTime", ""),
         "update_time_display": format_update_time(live.get("UpdateTime", "")),
         "status": race_status_text(live),
-        "class_filter": class_label,
         "row_count": len(rows),
         "rows": [asdict(row) for row in rows],
     }
@@ -413,14 +695,12 @@ def save_latest_files(
     rows: list[TimingRow],
     master: dict[str, Any],
     live: dict[str, Any],
-    class_filter: str | None,
 ) -> dict[str, Path]:
     ensure_output_dir(output_dir)
-    class_label = class_filter or "ALL"
-    snapshot = build_snapshot(rows, master, live, class_filter)
+    snapshot = build_snapshot(rows, master, live)
 
-    json_path = output_dir / f"latest_{class_label}.json"
-    csv_path = output_dir / f"latest_{class_label}.csv"
+    json_path = latest_json_path(output_dir)
+    csv_path = latest_csv_path(output_dir)
 
     json_path.write_text(
         json.dumps(snapshot, ensure_ascii=False, indent=2),
@@ -468,12 +748,10 @@ def append_history(
     rows: list[TimingRow],
     master: dict[str, Any],
     live: dict[str, Any],
-    class_filter: str | None,
 ) -> Path:
     ensure_output_dir(output_dir)
-    class_label = class_filter or "ALL"
-    history_path = output_dir / f"history_{class_label}.csv"
-    snapshot = build_snapshot(rows, master, live, class_filter)
+    history_path = history_csv_path(output_dir)
+    snapshot = build_snapshot(rows, master, live)
 
     fieldnames = [
         "saved_at",
@@ -512,90 +790,321 @@ def append_history(
 
     return history_path
 
-
-def save_html_file(
+def append_raw_snapshot(
     output_dir: Path,
-    rows: list[TimingRow],
     master: dict[str, Any],
     live: dict[str, Any],
-    class_filter: str | None,
-    interval: int,
 ) -> Path:
+    ensure_output_dir(warehouse_dir(output_dir))
+    snapshot_path = raw_snapshots_csv_path(output_dir)
+    saved_at = datetime.now().isoformat(timespec="seconds")
+    fieldnames = [
+        "saved_at",
+        "update_time_display",
+        "status",
+        "race_name",
+        "race_year",
+        "master_json",
+        "live_json",
+    ]
+    row = {
+        "saved_at": saved_at,
+        "update_time_display": format_update_time(live.get("UpdateTime", "")),
+        "status": race_status_text(live),
+        "race_name": str(master.get("RaceNameL", "")),
+        "race_year": str(master.get("RaceYear", "")),
+        "master_json": json.dumps(master, ensure_ascii=False, separators=(",", ":")),
+        "live_json": json.dumps(live, ensure_ascii=False, separators=(",", ":")),
+    }
+    write_header = not snapshot_path.exists()
+    with snapshot_path.open("a", encoding="utf-8-sig", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+    return snapshot_path
+
+
+def save_drivers_running_csv(
+    output_dir: Path,
+    driver_rows: list[DriverRow],
+    master: dict[str, Any],
+    live: dict[str, Any],
+) -> Path:
+    ensure_output_dir(warehouse_dir(output_dir))
+    path = drivers_running_csv_path(output_dir)
+    snapshot = build_snapshot([], master, live)
+    running_rows = [row for row in driver_rows if row.is_current]
+    fieldnames = [
+        "saved_at",
+        "update_time_display",
+        "status",
+        "driver_name",
+        "driver_slot",
+        "car_no",
+        "car_class",
+        "team_name",
+        "car_name",
+        "best_lap",
+        "last_lap",
+        "best_lap_ms",
+        "last_lap_ms",
+        "laps",
+        "pos",
+        "pic",
+        "is_current",
+    ]
+    with path.open("w", encoding="utf-8-sig", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in running_rows:
+            writer.writerow(
+                {
+                    "saved_at": snapshot["saved_at"],
+                    "update_time_display": snapshot["update_time_display"],
+                    "status": snapshot["status"],
+                    **asdict(row),
+                }
+            )
+    return path
+
+
+def _write_sheet_rows(
+    worksheet: Any,
+    headers: list[str],
+    rows: list[list[Any]],
+    *,
+    highlight_rows: set[int] | None = None,
+) -> None:
+    from openpyxl.styles import Font, PatternFill
+
+    header_font = Font(bold=True)
+    team_fill = PatternFill(start_color="FFE8E8", end_color="FFE8E8", fill_type="solid")
+    worksheet.append(headers)
+    for cell in worksheet[1]:
+        cell.font = header_font
+    for row_index, row in enumerate(rows, start=2):
+        worksheet.append(row)
+        if highlight_rows and row_index in highlight_rows:
+            for cell in worksheet[row_index]:
+                cell.fill = team_fill
+
+
+def export_live_xlsx(
+    output_dir: Path,
+    rows: list[TimingRow],
+    driver_rows: list[DriverRow],
+    master: dict[str, Any],
+    live: dict[str, Any],
+    default_class: str,
+    interval: int,
+) -> Path | None:
+    try:
+        from openpyxl import Workbook
+    except ImportError as exc:
+        raise RuntimeError("openpyxl が必要です: pip install openpyxl") from exc
+
     ensure_output_dir(output_dir)
-    class_label = class_filter or "ALL"
-    snapshot = build_snapshot(rows, master, live, class_filter)
-    html_path = output_dir / "index.html"
+    path = live_xlsx_path(output_dir)
+    temp_path = path.with_suffix(".xlsx.tmp")
+    snapshot = build_snapshot(rows, master, live)
+    running_rows = [row for row in driver_rows if row.is_current]
 
-    table_rows: list[str] = []
-    for row in rows:
-        best_class = "lap-best" if row.best_lap_ms > 0 else ""
-        live_class = "row-live" if row.has_live_data else ""
-        table_rows.append(
-            f"""<tr class="{live_class}" data-search="{html.escape(
-                ' '.join(
-                    [
-                        row.car_no,
-                        row.current_driver,
-                        row.all_drivers,
-                        row.team_name,
-                        row.car_name,
-                    ]
-                ),
-                quote=True,
-            )}">
-  <td class="num">{html.escape(row.pos)}</td>
-  <td class="num">{html.escape(row.pic)}</td>
-  <td class="num car-no">{html.escape(row.car_no)}</td>
-  <td><span class="class-badge">{html.escape(row.car_class)}</span></td>
-  <td class="driver">{html.escape(row.current_driver)}</td>
-  <td class="drivers">{html.escape(row.all_drivers)}</td>
-  <td class="lap {best_class}">{html.escape(row.best_lap)}</td>
-  <td class="lap">{html.escape(row.last_lap)}</td>
-  <td class="num">{html.escape(row.laps)}</td>
-  <td class="team">{html.escape(row.team_name)}</td>
-  <td class="car">{html.escape(row.car_name)}</td>
-</tr>"""
-        )
+    workbook = Workbook()
+    settings_sheet = workbook.active
+    settings_sheet.title = "設定"
+    settings_sheet.append(["項目", "値"])
+    for label, value in [
+        ("レース名", snapshot["race_name"]),
+        ("開催年", snapshot["race_year"]),
+        ("ラウンド", snapshot.get("round_no", "")),
+        ("更新時刻", snapshot["update_time_display"]),
+        ("保存時刻", snapshot["saved_at"]),
+        ("状態", snapshot["status"]),
+        ("表示クラス", default_class),
+        ("取得間隔(秒)", interval),
+        ("全車両数", len(rows)),
+        ("走行中ドライバー数", len(running_rows)),
+        ("生JSON倉庫", str(raw_snapshots_csv_path(output_dir))),
+        ("加工済み履歴", str(history_csv_path(output_dir))),
+    ]:
+        settings_sheet.append([label, value])
 
-    status = html.escape(snapshot["status"])
-    status_class = "status-live" if "受信中" in snapshot["status"] else "status-wait"
+    raw_sheet = workbook.create_sheet("元データ")
+    raw_headers = [
+        "POS", "PIC", "車番", "クラス", "走行中ドライバー", "全ドライバー",
+        "BestLap", "LastLap", "周回数", "チーム", "マシン", "ライブデータ",
+    ]
+    raw_rows: list[list[Any]] = []
+    highlight_rows: set[int] = set()
+    for index, row in enumerate(rows, start=2):
+        if row.car_no in TEAM_CAR_NOS:
+            highlight_rows.add(index)
+        raw_rows.append([
+            row.pos, row.pic, row.car_no, row.car_class, row.current_driver,
+            row.all_drivers, row.best_lap, row.last_lap, row.laps,
+            row.team_name, row.car_name, "あり" if row.has_live_data else "なし",
+        ])
+    _write_sheet_rows(raw_sheet, raw_headers, raw_rows, highlight_rows=highlight_rows)
 
-    page = f"""<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="refresh" content="{interval}">
-  <title>スーパー耐久 24H タイミング | {html.escape(class_label)}</title>
-  <style>
+    drivers_sheet = workbook.create_sheet("ドライバー")
+    driver_headers = [
+        "ドライバー", "スロット", "状態", "車番", "クラス", "BestLap", "LastLap",
+        "周回数", "POS", "PIC", "チーム", "マシン",
+    ]
+    driver_data: list[list[Any]] = []
+    driver_highlight: set[int] = set()
+    for index, row in enumerate(running_rows, start=2):
+        if row.car_no in TEAM_CAR_NOS:
+            driver_highlight.add(index)
+        driver_data.append([
+            row.driver_name, row.driver_slot, "走行中", row.car_no, row.car_class,
+            row.best_lap, row.last_lap, row.laps, row.pos, row.pic,
+            row.team_name, row.car_name,
+        ])
+    _write_sheet_rows(drivers_sheet, driver_headers, driver_data, highlight_rows=driver_highlight)
+
+    for worksheet in workbook.worksheets:
+        for column_cells in worksheet.columns:
+            max_length = 0
+            column_letter = column_cells[0].column_letter
+            for cell in column_cells:
+                value = "" if cell.value is None else str(cell.value)
+                max_length = max(max_length, len(value))
+            worksheet.column_dimensions[column_letter].width = min(max_length + 2, 48)
+
+    try:
+        workbook.save(temp_path)
+        temp_path.replace(path)
+    except OSError:
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+        return None
+    return path
+
+
+def dashboard_theme_css(*, drivers_page: bool = False) -> str:
+    sticky_panel_bg = "#221018" if drivers_page else ""
+    sticky_live_bg = "#2d1218" if drivers_page else ""
+    sticky_rules = ""
+    if drivers_page:
+        sticky_rules = f"""
+    #tableWrap {{
+      max-height: calc(100vh - 280px);
+    }}
+    .sticky-col {{
+      position: sticky;
+      background: {sticky_panel_bg};
+    }}
+    tr.row-live .sticky-col {{ background: {sticky_live_bg}; }}
+    tr.row-team .sticky-col {{ background: #351018; }}
+    thead .sticky-col {{
+      background: #3a1218;
+      z-index: 4;
+    }}
+    .sticky-col-1 {{
+      left: 0;
+      min-width: 160px;
+      max-width: 160px;
+    }}
+    .sticky-col-2 {{
+      left: 160px;
+      min-width: 64px;
+      max-width: 64px;
+    }}
+    .sticky-col-3 {{
+      left: 224px;
+      min-width: 88px;
+      max-width: 88px;
+      box-shadow: 4px 0 8px rgba(0, 0, 0, 0.35);
+    }}"""
+
+    return f"""
     :root {{
-      --bg: #11151c;
-      --panel: #1a2030;
-      --border: #2d3648;
-      --text: #e8edf7;
-      --muted: #9aa7bd;
+      --bg: #100608;
+      --panel: #1c0b10;
+      --panel-2: #261016;
+      --border: #4a1a24;
+      --text: #fff3f4;
+      --muted: #9a7880;
+      --text-strong: #fff8f6;
+      --text-driver: #ffd89a;
+      --text-driver-live: #fff4c8;
+      --text-body: #e4c4c8;
+      --text-faint: #6e5058;
+      --text-lap: #f2d6da;
+      --text-slot: #9ec8ff;
       --accent: #e10600;
-      --accent-soft: #ff4d4d;
-      --class: #1f8f4e;
-      --best: #7dd3fc;
-      --live: rgba(31, 143, 78, 0.12);
+      --accent-soft: #ff4d5a;
+      --accent-glow: rgba(225, 6, 0, 0.28);
+      --class: #ff8a8a;
+      --best: #fff0c8;
+      --live: rgba(225, 6, 0, 0.14);
+      --team: rgba(225, 6, 0, 0.22);
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
       font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
-      background: var(--bg);
+      background:
+        radial-gradient(circle at top right, rgba(225, 6, 0, 0.12), transparent 28%),
+        linear-gradient(180deg, #16080c 0%, var(--bg) 100%);
       color: var(--text);
+      min-height: 100vh;
     }}
     .wrap {{ max-width: 1600px; margin: 0 auto; padding: 20px; }}
-    .header {{
-      background: linear-gradient(135deg, #1a2030 0%, #10141c 100%);
+    .header.hero {{
+      position: relative;
+      overflow: hidden;
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 20px 24px;
+      border-radius: 16px;
       margin-bottom: 16px;
+      background: var(--panel);
     }}
-    h1 {{ margin: 0 0 8px; font-size: 1.5rem; }}
+    .hero-banner {{
+      position: absolute;
+      inset: 0;
+      background-image: url("{TEAM_BANNER_ASSET}");
+      background-size: cover;
+      background-position: center;
+      opacity: 0.34;
+    }}
+    .hero-banner::after {{
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(16, 6, 8, 0.96) 0%, rgba(16, 6, 8, 0.72) 45%, rgba(16, 6, 8, 0.88) 100%);
+    }}
+    .hero-inner {{
+      position: relative;
+      z-index: 1;
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      padding: 22px 24px;
+      flex-wrap: wrap;
+    }}
+    .team-logo {{
+      width: 88px;
+      height: 88px;
+      border-radius: 18px;
+      border: 2px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      object-fit: cover;
+      background: #fff;
+      flex: 0 0 auto;
+    }}
+    .hero-text {{ flex: 1 1 320px; min-width: 0; }}
+    .eyebrow {{
+      margin: 0 0 6px;
+      color: #ff9f9f;
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }}
+    h1 {{ margin: 0 0 8px; font-size: 1.65rem; line-height: 1.2; }}
+    .tagline {{ margin: 0 0 10px; color: var(--muted); font-size: 0.95rem; }}
     .meta {{ color: var(--muted); font-size: 0.95rem; line-height: 1.7; }}
     .status {{
       display: inline-block;
@@ -605,8 +1114,19 @@ def save_html_file(
       font-weight: 700;
       margin-top: 8px;
     }}
-    .status-live {{ background: rgba(31, 143, 78, 0.2); color: #7dffb2; }}
+    .status-live {{ background: rgba(225, 6, 0, 0.22); color: #ffb3b3; }}
     .status-wait {{ background: rgba(255, 180, 0, 0.15); color: #ffd166; }}
+    .x-link {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 10px;
+      color: #ffb4b4;
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 700;
+    }}
+    .x-link:hover {{ color: #fff; }}
     .toolbar {{
       display: flex;
       gap: 12px;
@@ -614,9 +1134,7 @@ def save_html_file(
       margin-bottom: 16px;
       flex-wrap: wrap;
     }}
-    .toolbar input {{
-      flex: 1;
-      min-width: 240px;
+    .toolbar select, .toolbar input {{
       padding: 10px 14px;
       border-radius: 8px;
       border: 1px solid var(--border);
@@ -624,16 +1142,19 @@ def save_html_file(
       color: var(--text);
       font-size: 1rem;
     }}
+    .toolbar select {{ min-width: 140px; }}
+    .toolbar input {{ flex: 1; min-width: 220px; }}
     .toolbar .info {{ color: var(--muted); font-size: 0.9rem; }}
     .nav-link {{
-      color: #9fd0ff;
+      color: #ffb4b4;
       text-decoration: none;
       padding: 10px 14px;
       border: 1px solid var(--border);
       border-radius: 8px;
       white-space: nowrap;
+      background: rgba(225, 6, 0, 0.08);
     }}
-    .nav-link:hover {{ background: rgba(255, 255, 255, 0.05); }}
+    .nav-link:hover {{ background: rgba(225, 6, 0, 0.18); }}
     .table-wrap {{
       overflow: auto;
       border: 1px solid var(--border);
@@ -642,8 +1163,9 @@ def save_html_file(
     }}
     table {{
       width: 100%;
-      border-collapse: collapse;
-      min-width: 1100px;
+      border-collapse: {"separate" if drivers_page else "collapse"};
+      border-spacing: 0;
+      min-width: {"1000px" if drivers_page else "1100px"};
       font-size: 0.92rem;
     }}
     th, td {{
@@ -652,69 +1174,165 @@ def save_html_file(
       text-align: left;
       vertical-align: top;
     }}
-    tbody td {{
-      font-size: calc(1em - 1pt);
-    }}
+    tbody td {{ font-size: calc(1em - 1pt); }}
     th {{
       position: sticky;
       top: 0;
-      background: #232b3d;
-      color: #d7e0f1;
+      background: #3a1218;
+      color: #ffd7d7;
       font-size: 0.8rem;
       letter-spacing: 0.04em;
       text-transform: uppercase;
-      z-index: 1;
+      z-index: 2;
     }}
     tr:hover {{ background: rgba(255, 255, 255, 0.03); }}
     tr.row-live {{ background: var(--live); }}
-    .num {{ text-align: center; white-space: nowrap; }}
-    .car-no {{ font-weight: 700; color: #fff; }}
+    tr.row-team {{ background: var(--team); box-shadow: inset 3px 0 0 var(--accent); }}
+    .num {{ text-align: center; white-space: nowrap; color: var(--text-body); }}
+    .car-no {{ font-weight: 800; color: var(--text-strong); }}
     .class-badge {{
       display: inline-block;
-      background: rgba(31, 143, 78, 0.2);
-      color: #8dffb8;
+      background: rgba(225, 6, 0, 0.18);
+      color: var(--class);
       padding: 2px 8px;
       border-radius: 6px;
       font-weight: 700;
       font-size: 0.82rem;
     }}
-    .driver {{ font-weight: 700; min-width: 120px; }}
-    .drivers, .team, .car {{ color: var(--muted); min-width: 160px; }}
+    .driver {{
+      font-weight: 800;
+      min-width: 120px;
+      color: var(--text-driver);
+      font-size: 1.02em;
+      letter-spacing: 0.02em;
+    }}
+    tr.row-live .driver {{
+      color: var(--text-driver-live);
+      text-shadow: 0 0 14px rgba(255, 244, 200, 0.28);
+    }}
+    .driver-slot {{ color: var(--text-slot); font-weight: 700; }}
+    .drivers {{ color: var(--muted); min-width: 160px; font-size: 0.9em; }}
+    .team, .car {{ color: var(--text-faint); min-width: 160px; font-size: 0.88em; }}
     .lap {{
       font-family: Consolas, "Courier New", monospace;
       white-space: nowrap;
       text-align: right;
       min-width: 90px;
+      color: var(--text-lap);
     }}
-    .lap-best {{ color: var(--best); font-weight: 700; }}
+    .lap-last {{ color: var(--text-body); }}
+    .lap-best {{
+      color: var(--best);
+      font-weight: 800;
+      text-shadow: 0 0 10px rgba(255, 240, 200, 0.35);
+    }}
+    .current-badge {{
+      display: inline-block;
+      background: rgba(225, 6, 0, 0.28);
+      color: #ffe0e0;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }}
     .hidden {{ display: none; }}
+    .lap-panel {{
+      margin-top: 16px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel-2);
+      padding: 16px 18px;
+    }}
+    .lap-panel h2 {{
+      margin: 0 0 12px;
+      font-size: 1.1rem;
+    }}
+    .lap-panel .summary {{
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 12px;
+    }}
+    .lap-panel .table-wrap {{
+      max-height: 420px;
+    }}
     .footer {{
       margin-top: 14px;
       color: var(--muted);
       font-size: 0.85rem;
-    }}
-  </style>
+      line-height: 1.6;
+    }}{sticky_rules}"""
+
+
+def dashboard_header_html(page_title: str) -> str:
+    return f"""
+    <div class="header hero">
+      <div class="hero-banner"></div>
+      <div class="hero-inner">
+        <img class="team-logo" src="{html.escape(TEAM_LOGO_ASSET)}" alt="{html.escape(TEAM_NAME)}">
+        <div class="hero-text">
+          <p class="eyebrow">#821 / #822 ST-5F</p>
+          <h1>{html.escape(page_title)}</h1>
+          <p class="tagline">{html.escape(TEAM_TAGLINE)}</p>
+          <div class="meta" id="metaBox">読み込み中...</div>
+          <span class="status status-wait" id="statusBadge">更新待ち</span><br>
+          <a class="x-link" href="{html.escape(TEAM_X_URL)}" target="_blank" rel="noopener">@AndLegal_Racing</a>
+        </div>
+      </div>
+    </div>"""
+
+
+def embed_view_data_script(view_data: dict[str, Any] | None) -> str:
+    if not view_data:
+        return ""
+    payload = json.dumps(view_data, ensure_ascii=False)
+    return f"<script>window.__INITIAL_VIEW_DATA__ = {payload};</script>\n"
+
+
+def start_static_server(root_dir: Path, port: int) -> http.server.ThreadingHTTPServer:
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler,
+        directory=str(root_dir),
+    )
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
+def dashboard_page_url(port: int, page: str = "data/index.html") -> str:
+    return f"http://127.0.0.1:{port}/{page}"
+
+
+def save_html_file(
+    output_dir: Path,
+    interval: int,
+    default_class: str,
+    initial_view_data: dict[str, Any] | None = None,
+) -> Path:
+    ensure_output_dir(output_dir)
+    html_path = output_dir / "index.html"
+    data_url = view_data_path(output_dir).name
+
+    page = f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{html.escape(TEAM_NAME)} | ライブタイミング</title>
+  <style>{dashboard_theme_css()}</style>
 </head>
 <body>
   <div class="wrap">
-    <div class="header">
-      <h1>スーパー耐久 24時間 ライブタイミング</h1>
-      <div class="meta">
-        レース: {html.escape(str(snapshot["race_name"]))} ({html.escape(str(snapshot["race_year"]))})<br>
-        クラス: {html.escape(class_label)}<br>
-        更新時刻: {html.escape(str(snapshot["update_time_display"]))}<br>
-        保存時刻: {html.escape(str(snapshot["saved_at"]))}
-      </div>
-      <span class="status {status_class}">{status}</span>
-    </div>
+    {dashboard_header_html(f"{TEAM_NAME} ライブタイミング")}
 
     <div class="toolbar">
+      <select id="classFilter"></select>
       <input id="search" type="search" placeholder="車番・ドライバー・チーム名で検索...">
       <a class="nav-link" href="drivers.html">ドライバー一覧</a>
-      <div class="info">表示: <span id="count">{len(rows)}</span> 件 / {interval}秒ごとに自動更新</div>
+      <div class="info">表示: <span id="count">0</span> 件 / <span id="pollInfo">{interval}秒ごとに自動更新</span></div>
     </div>
 
-    <div class="table-wrap">
+    <div class="table-wrap" id="tableWrap">
       <table>
         <thead>
           <tr>
@@ -731,35 +1349,147 @@ def save_html_file(
             <th>Car</th>
           </tr>
         </thead>
-        <tbody id="rows">
-          {"".join(table_rows)}
-        </tbody>
+        <tbody id="rows"></tbody>
       </table>
     </div>
 
     <div class="footer">
-      データ取得元: supertaikyu.live / このページはローカル保存された HTML です
+      {html.escape(TEAM_NAME)} 専用ダッシュボード / 全クラス蓄積・表示時フィルタ
     </div>
   </div>
 
+  {embed_view_data_script(initial_view_data)}
   <script>
+    const DATA_URL = "{html.escape(data_url)}";
+    const DEFAULT_CLASS = "{html.escape(default_class)}";
+    const TEAM_CAR_NOS = {json.dumps(list(TEAM_CAR_NOS))};
+    const CLASS_STORAGE_KEY = "st_selected_class";
+    const POLL_INTERVAL = {interval} * 1000;
+    const classFilter = document.getElementById("classFilter");
     const search = document.getElementById("search");
-    const rows = Array.from(document.querySelectorAll("#rows tr"));
     const count = document.getElementById("count");
+    const rowsBody = document.getElementById("rows");
+    const tableWrap = document.getElementById("tableWrap");
+    const metaBox = document.getElementById("metaBox");
+    const statusBadge = document.getElementById("statusBadge");
+    let latestData = {{ cars: [] }};
+
+    function escapeHtml(value) {{
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }}
+
+    function selectedClass() {{
+      return classFilter.value || "ALL";
+    }}
+
+    function matchesClass(carClass) {{
+      const selected = selectedClass();
+      return selected === "ALL" || carClass === selected;
+    }}
+
+    function rebuildClassFilter() {{
+      const selected = classFilter.value || localStorage.getItem(CLASS_STORAGE_KEY) || latestData.default_class || DEFAULT_CLASS;
+      classFilter.innerHTML = '<option value="ALL">全クラス</option>';
+      for (const carClass of latestData.classes || []) {{
+        const option = document.createElement("option");
+        option.value = carClass;
+        option.textContent = carClass;
+        classFilter.appendChild(option);
+      }}
+      const values = Array.from(classFilter.options).map((option) => option.value);
+      classFilter.value = values.includes(selected) ? selected : "ALL";
+    }}
+
+    function updateMeta() {{
+      metaBox.innerHTML = [
+        `レース: ${{escapeHtml(latestData.race_name || "")}} (${{escapeHtml(latestData.race_year || "")}})`,
+        `表示クラス: ${{escapeHtml(selectedClass())}} / 全 ${{latestData.cars?.length || 0}} 台`,
+        `更新時刻: ${{escapeHtml(latestData.update_time_display || "")}}`,
+        `保存時刻: ${{escapeHtml(latestData.saved_at || "")}}`,
+      ].join("<br>");
+      const isLive = (latestData.status || "").includes("受信中");
+      statusBadge.textContent = latestData.status || "-";
+      statusBadge.className = "status " + (isLive ? "status-live" : "status-wait");
+    }}
+
+    function renderRows() {{
+      const rows = (latestData.cars || []).filter((row) => matchesClass(row.car_class));
+      const html = rows.map((row) => {{
+        const searchText = [row.car_no, row.current_driver, row.all_drivers, row.team_name, row.car_name].join(" ");
+        const teamClass = TEAM_CAR_NOS.includes(String(row.car_no)) ? "row-team" : "";
+        const liveClass = row.has_live_data ? "row-live" : "";
+        const rowClass = [teamClass, liveClass].filter(Boolean).join(" ");
+        const bestClass = row.best_lap_ms > 0 ? "lap-best" : "";
+        return `<tr class="${{rowClass}}" data-class="${{escapeHtml(row.car_class)}}" data-search="${{escapeHtml(searchText)}}">
+  <td class="num">${{escapeHtml(row.pos)}}</td>
+  <td class="num">${{escapeHtml(row.pic)}}</td>
+  <td class="num car-no">${{escapeHtml(row.car_no)}}</td>
+  <td><span class="class-badge">${{escapeHtml(row.car_class)}}</span></td>
+  <td class="driver">${{escapeHtml(row.current_driver)}}</td>
+  <td class="drivers">${{escapeHtml(row.all_drivers)}}</td>
+  <td class="lap ${{bestClass}}">${{escapeHtml(row.best_lap)}}</td>
+  <td class="lap">${{escapeHtml(row.last_lap)}}</td>
+  <td class="num">${{escapeHtml(row.laps)}}</td>
+  <td class="team">${{escapeHtml(row.team_name)}}</td>
+  <td class="car">${{escapeHtml(row.car_name)}}</td>
+</tr>`;
+      }}).join("");
+      const scrollTop = tableWrap.scrollTop;
+      const scrollLeft = tableWrap.scrollLeft;
+      rowsBody.innerHTML = html;
+      tableWrap.scrollTop = scrollTop;
+      tableWrap.scrollLeft = scrollLeft;
+      filterRows();
+    }}
 
     function filterRows() {{
       const query = search.value.trim().toLowerCase();
       let visible = 0;
-      for (const row of rows) {{
+      for (const row of rowsBody.querySelectorAll("tr")) {{
         const haystack = (row.dataset.search || "").toLowerCase();
         const show = !query || haystack.includes(query);
         row.classList.toggle("hidden", !show);
         if (show) visible++;
       }}
       count.textContent = String(visible);
+      updateMeta();
     }}
 
+    function applyData(data) {{
+      latestData = data;
+      rebuildClassFilter();
+      renderRows();
+    }}
+
+    async function refreshData() {{
+      try {{
+        const response = await fetch(`${{DATA_URL}}?t=${{Date.now()}}`, {{ cache: "no-store" }});
+        if (!response.ok) return;
+        applyData(await response.json());
+      }} catch (error) {{
+        console.warn("更新に失敗しました", error);
+        if (location.protocol === "file:" && !(latestData.cars || []).length) {{
+          statusBadge.textContent = "file:// では更新不可";
+          statusBadge.className = "status status-wait";
+          metaBox.innerHTML += "<br><strong>start.bat を起動すると自動更新できます。</strong>";
+        }}
+      }}
+    }}
+
+    classFilter.addEventListener("change", () => {{
+      localStorage.setItem(CLASS_STORAGE_KEY, classFilter.value);
+      renderRows();
+    }});
     search.addEventListener("input", filterRows);
+    if (window.__INITIAL_VIEW_DATA__) {{
+      applyData(window.__INITIAL_VIEW_DATA__);
+    }}
+    refreshData();
+    setInterval(refreshData, POLL_INTERVAL);
   </script>
 </body>
 </html>
@@ -771,219 +1501,43 @@ def save_html_file(
 
 def save_drivers_html(
     output_dir: Path,
-    driver_rows: list[DriverRow],
-    master: dict[str, Any],
-    live: dict[str, Any],
-    class_filter: str | None,
     interval: int,
+    default_class: str,
+    initial_view_data: dict[str, Any] | None = None,
 ) -> Path:
     ensure_output_dir(output_dir)
-    class_label = class_filter or "ALL"
-    status = race_status_text(live)
-    status_class = "status-live" if "受信中" in status else "status-wait"
     html_path = output_dir / "drivers.html"
-
-    driver_names = sorted({row.driver_name for row in driver_rows})
-    option_rows = ['<option value="">すべてのドライバー</option>']
-    for name in driver_names:
-        option_rows.append(
-            f'<option value="{html.escape(name, quote=True)}">{html.escape(name)}</option>'
-        )
-
-    table_rows: list[str] = []
-    for row in driver_rows:
-        best_class = "lap-best" if row.best_lap_ms > 0 else ""
-        current_badge = '<span class="current-badge">走行中</span>' if row.is_current else "-"
-        row_class = "row-live" if row.is_current else ""
-        table_rows.append(
-            f"""<tr class="{row_class}" data-driver="{html.escape(row.driver_name, quote=True)}" data-search="{html.escape(
-                ' '.join([row.driver_name, row.car_no, row.team_name, row.car_name]),
-                quote=True,
-            )}">
-  <td class="driver">{html.escape(row.driver_name)}</td>
-  <td class="num">{html.escape(row.driver_slot)}</td>
-  <td class="current">{current_badge}</td>
-  <td class="num car-no">{html.escape(row.car_no)}</td>
-  <td><span class="class-badge">{html.escape(row.car_class)}</span></td>
-  <td class="lap {best_class}">{html.escape(row.best_lap)}</td>
-  <td class="lap">{html.escape(row.last_lap)}</td>
-  <td class="num">{html.escape(row.laps)}</td>
-  <td class="num">{html.escape(row.pos)}</td>
-  <td class="num">{html.escape(row.pic)}</td>
-  <td class="team">{html.escape(row.team_name)}</td>
-  <td class="car">{html.escape(row.car_name)}</td>
-</tr>"""
-        )
+    data_url = view_data_path(output_dir).name
 
     page = f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="refresh" content="{interval}">
-  <title>ドライバー一覧 | スーパー耐久 24H | {html.escape(class_label)}</title>
-  <style>
-    :root {{
-      --bg: #11151c;
-      --panel: #1a2030;
-      --border: #2d3648;
-      --text: #e8edf7;
-      --muted: #9aa7bd;
-      --best: #7dd3fc;
-      --live: rgba(31, 143, 78, 0.12);
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }}
-    .wrap {{ max-width: 1600px; margin: 0 auto; padding: 20px; }}
-    .header {{
-      background: linear-gradient(135deg, #1a2030 0%, #10141c 100%);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 20px 24px;
-      margin-bottom: 16px;
-    }}
-    h1 {{ margin: 0 0 8px; font-size: 1.5rem; }}
-    .meta {{ color: var(--muted); font-size: 0.95rem; line-height: 1.7; }}
-    .status {{
-      display: inline-block;
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 0.85rem;
-      font-weight: 700;
-      margin-top: 8px;
-    }}
-    .status-live {{ background: rgba(31, 143, 78, 0.2); color: #7dffb2; }}
-    .status-wait {{ background: rgba(255, 180, 0, 0.15); color: #ffd166; }}
-    .toolbar {{
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-    }}
-    .toolbar select, .toolbar input {{
-      padding: 10px 14px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: var(--panel);
-      color: var(--text);
-      font-size: 1rem;
-    }}
-    .toolbar select {{ min-width: 220px; }}
-    .toolbar input {{ flex: 1; min-width: 220px; }}
-    .toolbar .info {{ color: var(--muted); font-size: 0.9rem; }}
-    .nav-link {{
-      color: #9fd0ff;
-      text-decoration: none;
-      padding: 10px 14px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      white-space: nowrap;
-    }}
-    .nav-link:hover {{ background: rgba(255, 255, 255, 0.05); }}
-    .table-wrap {{
-      overflow: auto;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: var(--panel);
-    }}
-    table {{
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 1000px;
-      font-size: 0.92rem;
-    }}
-    th, td {{
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
-      text-align: left;
-      vertical-align: top;
-    }}
-    tbody td {{ font-size: calc(1em - 1pt); }}
-    th {{
-      position: sticky;
-      top: 0;
-      background: #232b3d;
-      color: #d7e0f1;
-      font-size: 0.8rem;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      z-index: 1;
-    }}
-    tr:hover {{ background: rgba(255, 255, 255, 0.03); }}
-    tr.row-live {{ background: var(--live); }}
-    .num {{ text-align: center; white-space: nowrap; }}
-    .car-no {{ font-weight: 700; color: #fff; }}
-    .class-badge {{
-      display: inline-block;
-      background: rgba(31, 143, 78, 0.2);
-      color: #8dffb8;
-      padding: 2px 8px;
-      border-radius: 6px;
-      font-weight: 700;
-      font-size: 0.82rem;
-    }}
-    .driver {{ font-weight: 700; min-width: 140px; }}
-    .team, .car {{ color: var(--muted); min-width: 160px; }}
-    .lap {{
-      font-family: Consolas, "Courier New", monospace;
-      white-space: nowrap;
-      text-align: right;
-      min-width: 90px;
-    }}
-    .lap-best {{ color: var(--best); font-weight: 700; }}
-    .current-badge {{
-      display: inline-block;
-      background: rgba(225, 6, 0, 0.2);
-      color: #ff8f8f;
-      padding: 2px 8px;
-      border-radius: 6px;
-      font-size: 0.82rem;
-      font-weight: 700;
-    }}
-    .hidden {{ display: none; }}
-    .footer {{
-      margin-top: 14px;
-      color: var(--muted);
-      font-size: 0.85rem;
-      line-height: 1.6;
-    }}
-  </style>
+  <title>{html.escape(TEAM_NAME)} | ドライバー一覧</title>
+  <style>{dashboard_theme_css(drivers_page=True)}</style>
 </head>
 <body>
   <div class="wrap">
-    <div class="header">
-      <h1>ドライバー結果一覧</h1>
-      <div class="meta">
-        レース: {html.escape(str(master.get("RaceNameL", "")))} ({html.escape(str(master.get("RaceYear", "")))})<br>
-        クラス: {html.escape(class_label)}<br>
-        更新時刻: {html.escape(format_update_time(live.get("UpdateTime", "")))}<br>
-        保存時刻: {html.escape(datetime.now().isoformat(timespec="seconds"))}
-      </div>
-      <span class="status {status_class}">{html.escape(status)}</span>
-    </div>
+    {dashboard_header_html(f"{TEAM_NAME} ドライバー一覧")}
 
     <div class="toolbar">
+      <select id="classFilter"></select>
       <select id="driverFilter">
-        {"".join(option_rows)}
+        <option value="">走行中ドライバー一覧</option>
       </select>
       <input id="search" type="search" placeholder="ドライバー・車番・チーム名で検索...">
       <a class="nav-link" href="index.html">車両一覧</a>
-      <div class="info">表示: <span id="count">{len(driver_rows)}</span> 件 / {interval}秒ごとに自動更新</div>
+      <div class="info">走行中: <span id="count">0</span> 件 / <span id="pollInfo">{interval}秒ごとに自動更新</span></div>
     </div>
 
-    <div class="table-wrap">
+    <div class="table-wrap" id="tableWrap">
       <table>
         <thead>
           <tr>
-            <th>Driver</th>
-            <th>Slot</th>
-            <th>状態</th>
+            <th class="sticky-col sticky-col-1">Driver</th>
+            <th class="sticky-col sticky-col-2">Slot</th>
+            <th class="sticky-col sticky-col-3">状態</th>
             <th>No.</th>
             <th>Class</th>
             <th>BestLap</th>
@@ -995,30 +1549,190 @@ def save_drivers_html(
             <th>Car</th>
           </tr>
         </thead>
-        <tbody id="rows">
-          {"".join(table_rows)}
-        </tbody>
+        <tbody id="rows"></tbody>
       </table>
     </div>
 
+    <div id="lapPanel" class="lap-panel hidden">
+      <h2 id="lapPanelTitle">周回タイム</h2>
+      <div class="summary" id="lapPanelSummary"></div>
+      <div class="table-wrap" id="lapTableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Lap</th>
+              <th>Time</th>
+              <th>No.</th>
+              <th>Slot</th>
+              <th>記録時刻</th>
+            </tr>
+          </thead>
+          <tbody id="lapRows"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="footer">
-      BestLap / LastLap は車両単位のタイムです（同じ車のドライバーは同じ値が表示されます）<br>
-      データ取得元: supertaikyu.live / このページはローカル保存された HTML です
+      {html.escape(TEAM_NAME)} 専用ダッシュボード / ドライバー選択で周回タイムを表示
     </div>
   </div>
 
+  {embed_view_data_script(initial_view_data)}
   <script>
+    const DATA_URL = "{html.escape(data_url)}";
+    const DEFAULT_CLASS = "{html.escape(default_class)}";
+    const TEAM_CAR_NOS = {json.dumps(list(TEAM_CAR_NOS))};
+    const CLASS_STORAGE_KEY = "st_selected_class";
+    const POLL_INTERVAL = {interval} * 1000;
+    const classFilter = document.getElementById("classFilter");
     const driverFilter = document.getElementById("driverFilter");
     const search = document.getElementById("search");
-    const rows = Array.from(document.querySelectorAll("#rows tr"));
+    const rowsBody = document.getElementById("rows");
     const count = document.getElementById("count");
+    const tableWrap = document.getElementById("tableWrap");
+    const lapPanel = document.getElementById("lapPanel");
+    const lapPanelTitle = document.getElementById("lapPanelTitle");
+    const lapPanelSummary = document.getElementById("lapPanelSummary");
+    const lapRowsBody = document.getElementById("lapRows");
+    const lapTableWrap = document.getElementById("lapTableWrap");
+    const metaBox = document.getElementById("metaBox");
+    const statusBadge = document.getElementById("statusBadge");
+    let latestData = {{ drivers: [], lap_history: [] }};
+
+    function escapeHtml(value) {{
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }}
+
+    function selectedClass() {{
+      return classFilter.value || "ALL";
+    }}
+
+    function matchesClass(carClass) {{
+      const selected = selectedClass();
+      return selected === "ALL" || carClass === selected;
+    }}
+
+    function runningDrivers() {{
+      return (latestData.drivers || []).filter((row) => row.is_current && matchesClass(row.car_class));
+    }}
+
+    function rebuildClassFilter() {{
+      const selected = classFilter.value || localStorage.getItem(CLASS_STORAGE_KEY) || latestData.default_class || DEFAULT_CLASS;
+      classFilter.innerHTML = '<option value="ALL">全クラス</option>';
+      for (const carClass of latestData.classes || []) {{
+        const option = document.createElement("option");
+        option.value = carClass;
+        option.textContent = carClass;
+        classFilter.appendChild(option);
+      }}
+      const values = Array.from(classFilter.options).map((option) => option.value);
+      classFilter.value = values.includes(selected) ? selected : "ALL";
+    }}
+
+    function updateMeta() {{
+      metaBox.innerHTML = [
+        `レース: ${{escapeHtml(latestData.race_name || "")}} (${{escapeHtml(latestData.race_year || "")}})`,
+        `表示クラス: ${{escapeHtml(selectedClass())}}`,
+        `更新時刻: ${{escapeHtml(latestData.update_time_display || "")}}`,
+        `保存時刻: ${{escapeHtml(latestData.saved_at || "")}}`,
+      ].join("<br>");
+      const isLive = (latestData.status || "").includes("受信中");
+      statusBadge.textContent = latestData.status || "-";
+      statusBadge.className = "status " + (isLive ? "status-live" : "status-wait");
+    }}
+
+    function rebuildDriverFilter() {{
+      const selected = driverFilter.value;
+      const names = new Set();
+      for (const row of runningDrivers()) names.add(row.driver_name);
+      for (const lap of latestData.lap_history || []) {{
+        if (matchesClass(lap.car_class || "")) names.add(lap.driver_name);
+      }}
+      const sorted = Array.from(names).sort();
+      driverFilter.innerHTML = '<option value="">走行中ドライバー一覧</option>';
+      for (const name of sorted) {{
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        driverFilter.appendChild(option);
+      }}
+      if (selected && sorted.includes(selected)) driverFilter.value = selected;
+    }}
+
+    function renderRunningTable() {{
+      const rows = runningDrivers();
+      const html = rows.map((row) => {{
+        const searchText = [row.driver_name, row.car_no, row.team_name, row.car_name].join(" ");
+        const bestClass = row.best_lap_ms > 0 ? "lap-best" : "";
+        const teamClass = TEAM_CAR_NOS.includes(String(row.car_no)) ? "row-team" : "";
+        const rowClass = ["row-live", teamClass].filter(Boolean).join(" ");
+        return `<tr class="${{rowClass}}" data-driver="${{escapeHtml(row.driver_name)}}" data-class="${{escapeHtml(row.car_class)}}" data-search="${{escapeHtml(searchText)}}">
+  <td class="driver sticky-col sticky-col-1">${{escapeHtml(row.driver_name)}}</td>
+  <td class="num sticky-col sticky-col-2">${{escapeHtml(row.driver_slot)}}</td>
+  <td class="current sticky-col sticky-col-3"><span class="current-badge">走行中</span></td>
+  <td class="num car-no">${{escapeHtml(row.car_no)}}</td>
+  <td><span class="class-badge">${{escapeHtml(row.car_class)}}</span></td>
+  <td class="lap ${{bestClass}}">${{escapeHtml(row.best_lap)}}</td>
+  <td class="lap">${{escapeHtml(row.last_lap)}}</td>
+  <td class="num">${{escapeHtml(row.laps)}}</td>
+  <td class="num">${{escapeHtml(row.pos)}}</td>
+  <td class="num">${{escapeHtml(row.pic)}}</td>
+  <td class="team">${{escapeHtml(row.team_name)}}</td>
+  <td class="car">${{escapeHtml(row.car_name)}}</td>
+</tr>`;
+      }}).join("");
+      const scrollTop = tableWrap.scrollTop;
+      const scrollLeft = tableWrap.scrollLeft;
+      rowsBody.innerHTML = html;
+      tableWrap.scrollTop = scrollTop;
+      tableWrap.scrollLeft = scrollLeft;
+      filterRows();
+    }}
+
+    function renderLapHistory() {{
+      const selectedDriver = driverFilter.value;
+      if (!selectedDriver) {{
+        lapPanel.classList.add("hidden");
+        return;
+      }}
+
+      const laps = (latestData.lap_history || [])
+        .filter((lap) => lap.driver_name === selectedDriver && matchesClass(lap.car_class || ""))
+        .sort((a, b) => Number(a.lap_no) - Number(b.lap_no));
+
+      lapPanel.classList.remove("hidden");
+      lapPanelTitle.textContent = `${{selectedDriver}} の周回タイム`;
+      if (!laps.length) {{
+        lapPanelSummary.textContent = "まだ周回データがありません（取得開始後に蓄積されます）";
+        lapRowsBody.innerHTML = "";
+        return;
+      }}
+
+      const bestMs = Math.min(...laps.map((lap) => Number(lap.lap_time_ms)).filter((v) => v > 0));
+      lapPanelSummary.textContent = `全 ${{laps.length}} 周`;
+      const scrollTop = lapTableWrap.scrollTop;
+      lapRowsBody.innerHTML = laps.map((lap) => {{
+        const bestClass = Number(lap.lap_time_ms) === bestMs ? "lap-best" : "";
+        return `<tr>
+  <td class="num">${{escapeHtml(lap.lap_no)}}</td>
+  <td class="lap ${{bestClass}}">${{escapeHtml(lap.lap_time)}}</td>
+  <td class="num car-no">${{escapeHtml(lap.car_no)}}</td>
+  <td class="num">${{escapeHtml(lap.driver_slot)}}</td>
+  <td>${{escapeHtml(lap.recorded_at || "")}}</td>
+</tr>`;
+      }}).join("");
+      lapTableWrap.scrollTop = scrollTop;
+    }}
 
     function filterRows() {{
       const selectedDriver = driverFilter.value;
       const query = search.value.trim().toLowerCase();
       let visible = 0;
-
-      for (const row of rows) {{
+      for (const row of rowsBody.querySelectorAll("tr")) {{
         const driverName = row.dataset.driver || "";
         const haystack = (row.dataset.search || "").toLowerCase();
         const matchDriver = !selectedDriver || driverName === selectedDriver;
@@ -1027,12 +1741,39 @@ def save_drivers_html(
         row.classList.toggle("hidden", !show);
         if (show) visible++;
       }}
-
       count.textContent = String(visible);
+      renderLapHistory();
+      updateMeta();
     }}
 
+    function applyData(data) {{
+      latestData = data;
+      rebuildClassFilter();
+      rebuildDriverFilter();
+      renderRunningTable();
+      updateMeta();
+    }}
+
+    async function refreshData() {{
+      try {{
+        const response = await fetch(`${{DATA_URL}}?t=${{Date.now()}}`, {{ cache: "no-store" }});
+        if (!response.ok) return;
+        applyData(await response.json());
+      }} catch (error) {{
+        console.warn("更新に失敗しました", error);
+      }}
+    }}
+
+    classFilter.addEventListener("change", () => {{
+      localStorage.setItem(CLASS_STORAGE_KEY, classFilter.value);
+      rebuildDriverFilter();
+      renderRunningTable();
+      updateMeta();
+    }});
     driverFilter.addEventListener("change", filterRows);
     search.addEventListener("input", filterRows);
+    refreshData();
+    setInterval(refreshData, POLL_INTERVAL);
   </script>
 </body>
 </html>
@@ -1044,32 +1785,64 @@ def save_drivers_html(
 
 def persist_outputs(
     args: argparse.Namespace,
-    rows: list[TimingRow],
     master: dict[str, Any],
     live: dict[str, Any],
 ) -> dict[str, Path]:
-    saved_paths = save_latest_files(args.output_dir, rows, master, live, args.class_filter)
+    all_rows = build_rows(master, live, None, args.english)
+    all_driver_rows = build_driver_rows(master, live, None, args.english)
+    default_class = class_label_for(args.class_filter)
+
+    saved_paths = save_latest_files(args.output_dir, all_rows, master, live)
     if args.history:
-        saved_paths["history"] = append_history(
-            args.output_dir, rows, master, live, args.class_filter
-        )
-    if args.html:
-        driver_rows = build_driver_rows(master, live, args.class_filter, args.english)
-        saved_paths["html"] = save_html_file(
+        saved_paths["history"] = append_history(args.output_dir, all_rows, master, live)
+        saved_paths["raw_snapshots"] = append_raw_snapshot(args.output_dir, master, live)
+    if args.excel:
+        saved_paths["drivers_running"] = save_drivers_running_csv(
             args.output_dir,
-            rows,
+            all_driver_rows,
             master,
             live,
-            args.class_filter,
+        )
+        excel_path = export_live_xlsx(
+            args.output_dir,
+            all_rows,
+            all_driver_rows,
+            master,
+            live,
+            default_class,
             args.interval,
+        )
+        if excel_path:
+            saved_paths["excel"] = excel_path
+    if args.html:
+        saved_paths["lap_history"] = update_lap_history(
+            args.output_dir,
+            master,
+            live,
+            args.english,
+        )
+        view_data_path = save_view_data_json(
+            args.output_dir,
+            all_rows,
+            all_driver_rows,
+            master,
+            live,
+            args.interval,
+            default_class,
+        )
+        saved_paths["view_data"] = view_data_path
+        view_data = read_json_file(view_data_path)
+        saved_paths["html"] = save_html_file(
+            args.output_dir,
+            args.interval,
+            default_class,
+            initial_view_data=view_data,
         )
         saved_paths["drivers_html"] = save_drivers_html(
             args.output_dir,
-            driver_rows,
-            master,
-            live,
-            args.class_filter,
             args.interval,
+            default_class,
+            initial_view_data=view_data,
         )
     return saved_paths
 
@@ -1079,16 +1852,17 @@ def run_once(args: argparse.Namespace) -> int:
     session.headers.update({"User-Agent": "supertaikyu-timing-fetcher/1.0"})
 
     try:
-        rows, master, live = load_timing_data(session, args.class_filter, args.english)
+        rows, master, live = load_timing_data(session, None, args.english)
     except RuntimeError as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         return 1
 
+    display_rows = filter_rows_by_class(rows, args.class_filter)
     if args.search:
-        print_search_results(search_rows(rows, args.search), args.search)
+        print_search_results(search_rows(display_rows, args.search), args.search)
         return 0
 
-    saved_paths = persist_outputs(args, rows, master, live)
+    saved_paths = persist_outputs(args, master, live)
 
     if args.html:
         print(f"HTML: {saved_paths['html']}")
@@ -1098,25 +1872,52 @@ def run_once(args: argparse.Namespace) -> int:
             f"状態: {race_status_text(live)}",
             f"更新時刻: {format_update_time(live.get('UpdateTime', ''))}",
             f"レース: {master.get('RaceNameL', '-')} ({master.get('RaceYear', '-')})",
-            f"クラス: {args.class_filter or '全クラス'}",
+            f"表示クラス: {class_label_for(args.class_filter)}",
+            f"保存: 全クラス一括",
             f"保存先: {args.output_dir}",
             f"JSON: {saved_paths['json']}",
             f"CSV : {saved_paths['csv']}",
         ]
+        if "view_data" in saved_paths:
+            header.append(f"View JSON: {saved_paths['view_data']}")
         if "html" in saved_paths:
             header.append(f"HTML: {saved_paths['html']}")
         if "drivers_html" in saved_paths:
             header.append(f"Drivers HTML: {saved_paths['drivers_html']}")
-        print_table(rows, header)
+        if "excel" in saved_paths:
+            header.append(f"Excel: {saved_paths['excel']}")
+        if "raw_snapshots" in saved_paths:
+            header.append(f"Raw CSV: {saved_paths['raw_snapshots']}")
+        print_table(display_rows, header)
     return 0
+
+
+def run_serve_browser(args: argparse.Namespace) -> int:
+    page = "data/drivers.html" if args.serve_page == "drivers" else "data/index.html"
+    server = start_static_server(APP_DIR, args.http_port)
+    url = dashboard_page_url(args.http_port, page)
+    webbrowser.open(url)
+    print(f"ローカルサーバー: http://127.0.0.1:{args.http_port}/")
+    print(f"ブラウザを開きました: {url}")
+    print("終了は Ctrl+C です。")
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        print("\n終了します。")
+        server.shutdown()
+        return 0
 
 
 def run_watch(args: argparse.Namespace) -> int:
     session = requests.Session()
     session.headers.update({"User-Agent": "supertaikyu-timing-fetcher/1.0"})
 
-    html_path = args.output_dir / "index.html"
     browser_opened = False
+    if args.html:
+        start_static_server(APP_DIR, args.http_port)
+        if not args.quiet:
+            print(f"ダッシュボード: {dashboard_page_url(args.http_port)}")
 
     if args.html and not args.quiet:
         print("HTML 表示モードを開始します。ブラウザを見ながらバックグラウンド更新します。")
@@ -1128,17 +1929,19 @@ def run_watch(args: argparse.Namespace) -> int:
 
     while True:
         try:
-            rows, master, live = load_timing_data(session, args.class_filter, args.english)
+            rows, master, live = load_timing_data(session, None, args.english)
+            display_rows = filter_rows_by_class(rows, args.class_filter)
             if args.search:
-                rows = search_rows(rows, args.search)
+                display_rows = search_rows(display_rows, args.search)
 
-            saved_paths = persist_outputs(args, rows, master, live)
+            saved_paths = persist_outputs(args, master, live)
 
             if args.open_browser and args.html and not browser_opened and "html" in saved_paths:
-                webbrowser.open(saved_paths["html"].resolve().as_uri())
+                url = dashboard_page_url(args.http_port)
+                webbrowser.open(url)
                 browser_opened = True
                 if not args.quiet:
-                    print(f"ブラウザで HTML を開きました: {saved_paths['html']}")
+                    print(f"ブラウザで HTML を開きました: {url}")
 
             if args.quiet or args.html:
                 status = race_status_text(live)
@@ -1148,8 +1951,10 @@ def run_watch(args: argparse.Namespace) -> int:
                     html_info = f" | HTML: {saved_paths['html']}"
                 if "drivers_html" in saved_paths:
                     html_info += f" | Drivers: {saved_paths['drivers_html']}"
+                if "excel" in saved_paths:
+                    html_info += f" | Excel: {saved_paths['excel']}"
                 print(
-                    f"[{datetime.now().strftime('%H:%M:%S')}] {status} | 更新: {updated} | {len(rows)}件{html_info}"
+                    f"[{datetime.now().strftime('%H:%M:%S')}] {status} | 更新: {updated} | 全{len(rows)}台 / 表示{len(display_rows)}台{html_info}"
                 )
             else:
                 clear_screen()
@@ -1158,7 +1963,8 @@ def run_watch(args: argparse.Namespace) -> int:
                     f"状態: {race_status_text(live)}",
                     f"更新時刻: {format_update_time(live.get('UpdateTime', ''))}",
                     f"レース: {master.get('RaceNameL', '-')} ({master.get('RaceYear', '-')})",
-                    f"クラス: {args.class_filter or '全クラス'}",
+                    f"表示クラス: {class_label_for(args.class_filter)}",
+                    f"保存: 全クラス一括 ({len(rows)}台)",
                     f"自動更新: {args.interval}秒",
                 ]
                 if args.search:
@@ -1168,9 +1974,11 @@ def run_watch(args: argparse.Namespace) -> int:
                 header.append(f"保存先: {args.output_dir}")
                 header.append(f"JSON: {saved_paths['json']}")
                 header.append(f"CSV : {saved_paths['csv']}")
+                if "view_data" in saved_paths:
+                    header.append(f"View JSON: {saved_paths['view_data']}")
                 if "html" in saved_paths:
                     header.append(f"HTML: {saved_paths['html']}")
-                print_table(rows, header)
+                print_table(display_rows, header)
                 print("Ctrl+C で終了")
 
             time.sleep(args.interval)
@@ -1193,7 +2001,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--class",
         dest="class_filter",
         default=DEFAULT_CLASS,
-        help=f"Filter by class (default: {DEFAULT_CLASS}). Use ALL for every class.",
+        help=f"Default display class for terminal/HTML (default: {DEFAULT_CLASS}). Data is always saved for all classes. Use ALL to show every class.",
     )
     parser.add_argument(
         "--search",
@@ -1224,7 +2032,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--history",
         action="store_true",
-        help="Append each fetch to history CSV.",
+        help="Append each fetch to history CSV and raw JSON warehouse CSV.",
+    )
+    parser.add_argument(
+        "--excel",
+        action="store_true",
+        help="Update data/timing_live.xlsx and warehouse/drivers_running.csv.",
     )
     parser.add_argument(
         "--html",
@@ -1240,6 +2053,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--open-browser",
         action="store_true",
         help="Open index.html in the default browser on start.",
+    )
+    parser.add_argument(
+        "--http-port",
+        type=int,
+        default=DEFAULT_HTTP_PORT,
+        help=f"Local HTTP port for dashboard (default: {DEFAULT_HTTP_PORT}).",
+    )
+    parser.add_argument(
+        "--serve-browser",
+        action="store_true",
+        help="Serve saved HTML/JSON over HTTP and open the browser (no fetch loop).",
+    )
+    parser.add_argument(
+        "--serve-page",
+        choices=("index", "drivers"),
+        default="index",
+        help="Page to open with --serve-browser (default: index).",
     )
     return parser
 
@@ -1261,6 +2091,8 @@ def main() -> int:
             file=sys.stderr,
         )
 
+    if args.serve_browser:
+        return run_serve_browser(args)
     if args.once:
         return run_once(args)
     return run_watch(args)

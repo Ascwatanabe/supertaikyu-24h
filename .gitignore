@@ -2,6 +2,9 @@
 data/*.json
 data/*.csv
 data/*.html
+data/*.xlsx
+data/export/
+data/warehouse/
 
 # Python
 __pycache__/
