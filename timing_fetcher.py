@@ -1123,8 +1123,8 @@ def export_live_xlsx(
 
 
 def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False) -> str:
-    sticky_panel_bg = "#221018" if drivers_page else ""
-    sticky_live_bg = "#2d1218" if drivers_page else ""
+    sticky_panel_bg = "#3a2f36" if drivers_page else ""
+    sticky_live_bg = "#46343b" if drivers_page else ""
     sticky_rules = ""
     if drivers_page:
         sticky_rules = f"""
@@ -1136,9 +1136,9 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       background: {sticky_panel_bg};
     }}
     tr.row-live .sticky-col {{ background: {sticky_live_bg}; }}
-    tr.row-team .sticky-col {{ background: #351018; }}
+    tr.row-team .sticky-col {{ background: #523a42; }}
     thead .sticky-col {{
-      background: #3a1218;
+      background: #5a3640;
       z-index: 4;
     }}
     .sticky-col-1 {{
@@ -1160,19 +1160,19 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
 
     return f"""
     :root {{
-      --bg: #100608;
-      --panel: #1c0b10;
-      --panel-2: #261016;
-      --border: #4a1a24;
-      --text: #fff3f4;
-      --muted: #9a7880;
-      --text-strong: #fff8f6;
-      --text-driver: #ffd89a;
+      --bg: #2c242a;
+      --panel: #382e34;
+      --panel-2: #43363e;
+      --border: #5e4650;
+      --text: #ffffff;
+      --muted: #e3d4d8;
+      --text-strong: #ffffff;
+      --text-driver: #ffffff;
       --text-driver-live: #fff4c8;
-      --text-body: #e4c4c8;
-      --text-faint: #6e5058;
-      --text-lap: #f2d6da;
-      --text-slot: #9ec8ff;
+      --text-body: #ffffff;
+      --text-faint: #ecdfe2;
+      --text-lap: #ffffff;
+      --text-slot: #cfe2ff;
       --accent: #e10600;
       --accent-soft: #ff4d5a;
       --accent-glow: rgba(225, 6, 0, 0.28);
@@ -1180,6 +1180,7 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       --best: #fff0c8;
       --live: rgba(225, 6, 0, 0.14);
       --team: rgba(225, 6, 0, 0.22);
+      --page-font: calc(0.92rem + 3pt);
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -1187,11 +1188,12 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
       background:
         radial-gradient(circle at top right, rgba(225, 6, 0, 0.12), transparent 28%),
-        linear-gradient(180deg, #16080c 0%, var(--bg) 100%);
+        linear-gradient(180deg, #352a32 0%, var(--bg) 100%);
       color: var(--text);
       min-height: 100vh;
     }}
     .wrap {{ max-width: 1600px; margin: 0 auto; padding: 20px; }}
+    .wrap, .wrap * {{ font-size: var(--page-font) !important; }}
     .header.hero {{
       position: relative;
       overflow: hidden;
@@ -1212,7 +1214,7 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       content: "";
       position: absolute;
       inset: 0;
-      background: linear-gradient(90deg, rgba(16, 6, 8, 0.96) 0%, rgba(16, 6, 8, 0.72) 45%, rgba(16, 6, 8, 0.88) 100%);
+      background: linear-gradient(90deg, rgba(44, 36, 42, 0.94) 0%, rgba(44, 36, 42, 0.68) 45%, rgba(44, 36, 42, 0.86) 100%);
     }}
     .hero-inner {{
       position: relative;
@@ -1331,11 +1333,11 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       border: 1px solid var(--border);
       background: var(--panel);
       color: var(--text);
-      font-size: 1rem;
+      font-size: calc(1rem + 2pt);
     }}
     .toolbar select {{ min-width: 140px; }}
     .toolbar input {{ flex: 1; min-width: 220px; }}
-    .toolbar .info {{ color: var(--muted); font-size: 0.9rem; }}
+    .toolbar .info {{ color: var(--muted); font-size: calc(0.9rem + 2pt); }}
     .nav-link {{
       color: #ffb4b4;
       text-decoration: none;
@@ -1365,13 +1367,13 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       text-align: left;
       vertical-align: top;
     }}
-    tbody td {{ font-size: calc(1em - 1pt); }}
+    tbody td {{ font-size: calc(1em + 3pt); }}
     th {{
       position: sticky;
       top: 0;
-      background: #3a1218;
+      background: #5a3640;
       color: #ffd7d7;
-      font-size: 0.8rem;
+      font-size: calc(0.8rem + 2pt);
       letter-spacing: 0.04em;
       text-transform: uppercase;
       z-index: 2;
@@ -1451,10 +1453,10 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       max-height: 420px;
     }}
     .lap-panel table th {{
-      font-size: calc(0.8rem + 5pt);
+      font-size: calc(0.8rem + 7pt);
     }}
     .lap-panel table tbody td {{
-      font-size: calc(1em + 4pt);
+      font-size: calc(1em + 6pt);
     }}
     .lap-panel th.sortable {{
       cursor: pointer;
@@ -1499,6 +1501,67 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
     .video-panel {{
       min-width: 0;
     }}
+    .video-controls {{
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }}
+    .video-controls input[type="range"] {{
+      width: min(360px, 42vw);
+      accent-color: var(--accent);
+    }}
+    .video-size-value {{
+      min-width: 56px;
+      color: var(--text-body);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }}
+    .youtube-settings {{
+      margin-top: 16px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 12px;
+    }}
+    .youtube-settings h2 {{
+      margin: 0 0 8px;
+      color: var(--text-strong);
+    }}
+    .youtube-settings-row {{
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }}
+    .youtube-settings input {{
+      flex: 1 1 420px;
+      min-width: 240px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-2);
+      color: var(--text);
+    }}
+    .youtube-settings button {{
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(225, 6, 0, 0.12);
+      color: #ffdddd;
+      padding: 10px 14px;
+      cursor: pointer;
+    }}
+    .youtube-settings button:hover {{
+      background: rgba(225, 6, 0, 0.22);
+      color: #fff;
+    }}
+    .youtube-settings .summary {{
+      margin-top: 8px;
+      color: var(--muted);
+    }}
     .main-split.layout-horizontal .video-panel {{
       flex: 0 0 48%;
       min-width: 300px;
@@ -1520,7 +1583,7 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       background: #000;
     }}
     .main-split.layout-vertical .video-frame {{
-      max-width: 960px;
+      max-width: var(--video-max-width, 960px);
       margin: 0 auto;
     }}
     .video-frame iframe {{
@@ -1553,48 +1616,137 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       max-height: calc(100vh - 240px);
     }}
     .lap-column {{
-      flex: 0 0 260px;
-      width: 260px;
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      width: var(--lap-col-width, 260px);
       border: 1px solid var(--border);
       border-radius: 12px;
       background: var(--panel-2);
       display: flex;
       flex-direction: column;
-      position: sticky;
-      top: 16px;
       height: calc(100vh - 32px);
       max-height: calc(100vh - 32px);
+      z-index: 50;
+      box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
+    }}
+    .lap-column.dragging {{
+      user-select: none;
+      box-shadow: 0 18px 56px rgba(0, 0, 0, 0.6);
     }}
     @media (max-width: 1100px) {{
-      .page-split {{
-        flex-direction: column;
-      }}
       .lap-column {{
-        flex: none;
-        width: 100%;
-        position: static;
-        height: auto;
-        max-height: calc(100vh - 240px);
+        width: var(--lap-col-width, min(90vw, 360px));
+        max-height: calc(100vh - 120px);
       }}
     }}
     .lap-column.hidden {{
       display: none;
     }}
     .lap-column-header {{
-      padding: 10px 12px 8px;
+      padding: 8px 12px 8px;
       border-bottom: 1px solid var(--border);
       flex: 0 0 auto;
+      cursor: move;
+    }}
+    .lap-col-bar {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: space-between;
+    }}
+    .lap-col-tools {{
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+    }}
+    .lap-col-tools input[type="range"] {{
+      width: 84px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }}
+    .lap-col-reset {{
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: transparent;
+      color: #ffb4b4;
+      font-size: 0.78rem;
+      line-height: 1;
+      padding: 3px 7px;
+      cursor: pointer;
+    }}
+    .lap-col-reset:hover {{
+      background: rgba(225, 6, 0, 0.16);
+      color: #fff;
+    }}
+    .lap-group-btn.hidden {{
+      display: none;
+    }}
+    .lap-group-btn.active {{
+      background: rgba(225, 6, 0, 0.3);
+      border-color: var(--accent-soft);
+      color: #fff;
+      font-weight: 700;
+    }}
+    .lap-group-row td {{
+      background: #4a3a42;
+      color: var(--text-driver);
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 1;
     }}
     .lap-column h2 {{
-      margin: 0 0 4px;
+      margin: 0;
       font-size: 0.92rem;
       line-height: 1.3;
+      flex: 1 1 auto;
+      min-width: 0;
     }}
     .lap-column .summary {{
       color: var(--muted);
       font-size: 0.76rem;
       margin: 0;
     }}
+    .lap-filter-pills {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 8px;
+    }}
+    .lap-filter-pills button {{
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      padding: 4px 9px;
+      font-size: 0.72rem;
+      line-height: 1;
+      cursor: pointer;
+    }}
+    .lap-filter-pills button.active {{
+      background: rgba(225, 6, 0, 0.28);
+      border-color: var(--accent-soft);
+      color: #fff;
+      font-weight: 700;
+    }}
+    .lap-column th.sortable {{
+      cursor: pointer;
+      user-select: none;
+    }}
+    .lap-column th.sortable:hover {{
+      color: #fff;
+    }}
+    .lap-column th.sortable .sort-icon {{
+      margin-left: 4px;
+      font-size: 0.7rem;
+      opacity: 0.75;
+    }}
+    .lap-column th.sortable.sort-asc .sort-icon::after {{ content: "▲"; }}
+    .lap-column th.sortable.sort-desc .sort-icon::after {{ content: "▼"; }}
     .lap-column .table-wrap {{
       flex: 1 1 auto;
       overflow: auto;
@@ -1604,14 +1756,14 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
     }}
     .lap-column table {{
       min-width: 0;
-      font-size: 0.8rem;
+      font-size: calc(0.8rem + 2pt);
     }}
     .lap-column th,
     .lap-column td {{
       padding: 6px 8px;
     }}
     .lap-column table tbody td {{
-      font-size: 0.78rem;
+      font-size: calc(0.92rem + 3pt);
     }}
     .driver-filter {{
       border: 1px solid var(--border);
@@ -1778,8 +1930,14 @@ def save_html_file(
       <div class="page-main">
     <div id="mainSplit" class="main-split layout-vertical">
       <div class="video-panel">
+        <div class="video-controls">
+          <label for="videoSize">YouTubeサイズ</label>
+          <input id="videoSize" type="range" min="480" max="1400" step="20" value="960">
+          <span id="videoSizeValue" class="video-size-value">960px</span>
+        </div>
         <div class="video-frame">
           <iframe
+            id="youtubeFrame"
             src="https://www.youtube.com/embed/{html.escape(TEAM_YOUTUBE_VIDEO_ID)}"
             title="YouTube live"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -1801,6 +1959,7 @@ def save_html_file(
           </div>
           <input id="search" type="search" placeholder="車番・ドライバー・チーム名で検索...">
           <a class="nav-link" href="drivers.html">ドライバー一覧</a>
+          <a class="nav-link" href="timing_live.xlsx" download>Excel出力</a>
           <div class="info">表示: <span id="count">0</span> 件 / <span id="pollInfo">{interval}秒ごとに自動更新</span></div>
         </div>
 
@@ -1838,18 +1997,26 @@ def save_html_file(
       </div>
 
       <div id="lapColumn" class="lap-column hidden">
-        <div class="lap-column-header">
-          <h2 id="lapPanelTitle">周回タイム</h2>
+        <div class="lap-column-header" id="lapColumnHandle">
+          <div class="lap-col-bar">
+            <h2 id="lapPanelTitle">周回タイム</h2>
+            <div class="lap-col-tools">
+              <button type="button" id="lapGroupBtn" class="lap-col-reset lap-group-btn hidden" title="ドライバーごとにグループ表示">グループ</button>
+              <input id="lapColWidth" type="range" min="200" max="680" step="10" value="260" title="カラム幅">
+              <button type="button" id="lapColReset" class="lap-col-reset" title="位置と幅をリセット">⤺</button>
+            </div>
+          </div>
           <div class="summary" id="lapPanelSummary"></div>
+          <div id="lapFilterPills" class="lap-filter-pills"></div>
         </div>
         <div class="table-wrap" id="lapTableWrap">
           <table>
             <thead id="lapTableHead">
               <tr>
-                <th id="lapSortHeader" class="sortable sort-asc">Lap<span class="sort-icon"></span></th>
-                <th>Time</th>
-                <th class="lap-driver-col hidden">Driver</th>
-                <th>Slot</th>
+                <th class="sortable sort-asc" data-lap-sort="lap">Lap<span class="sort-icon"></span></th>
+                <th class="sortable" data-lap-sort="time">Time<span class="sort-icon"></span></th>
+                <th class="sortable lap-driver-col hidden" data-lap-sort="driver">Driver<span class="sort-icon"></span></th>
+                <th class="sortable" data-lap-sort="slot">Slot<span class="sort-icon"></span></th>
               </tr>
             </thead>
             <tbody id="lapRows"></tbody>
@@ -1858,13 +2025,31 @@ def save_html_file(
       </div>
   </div>
 
+    <section class="youtube-settings" aria-label="YouTube URL設定">
+      <h2>YouTube URL設定</h2>
+      <div class="youtube-settings-row">
+        <input id="youtubeUrlInput" type="url" placeholder="YouTube URL または動画IDを貼り付け">
+        <button type="button" id="youtubeApplyBtn">反映</button>
+        <button type="button" id="youtubeResetBtn">既定に戻す</button>
+      </div>
+      <div class="summary" id="youtubeUrlStatus">URLを貼り付けて反映できます。</div>
+    </section>
+
   {embed_view_data_script(initial_view_data)}
   <script>
     const DATA_URL = "{html.escape(data_url)}";
     const DEFAULT_CLASS = "{html.escape(default_class)}";
     const TEAM_CAR_NOS = {json.dumps(list(TEAM_CAR_NOS))};
+    const DEFAULT_YOUTUBE_VIDEO_ID = "{html.escape(TEAM_YOUTUBE_VIDEO_ID)}";
     const CLASS_STORAGE_KEY = "st_selected_class";
     const DRIVER_STORAGE_KEY = "st_index_selected_drivers";
+    const LAP_FILTER_STORAGE_KEY = "st_index_lap_driver_filter";
+    const LAP_SORT_STORAGE_KEY = "st_index_lap_sort";
+    const VIDEO_SIZE_STORAGE_KEY = "st_index_video_size";
+    const YOUTUBE_URL_STORAGE_KEY = "st_index_youtube_url";
+    const LAP_COL_WIDTH_STORAGE_KEY = "st_index_lap_col_width";
+    const LAP_COL_POS_STORAGE_KEY = "st_index_lap_col_pos";
+    const LAP_GROUP_STORAGE_KEY = "st_index_lap_group_by_driver";
     const POLL_INTERVAL = {interval} * 1000;
     const classFilter = document.getElementById("classFilter");
     const driverCheckboxes = document.getElementById("driverCheckboxes");
@@ -1873,18 +2058,33 @@ def save_html_file(
     const count = document.getElementById("count");
     const rowsBody = document.getElementById("rows");
     const tableWrap = document.getElementById("tableWrap");
+    const videoSize = document.getElementById("videoSize");
+    const videoSizeValue = document.getElementById("videoSizeValue");
+    const videoFrame = document.querySelector(".video-frame");
+    const youtubeFrame = document.getElementById("youtubeFrame");
+    const youtubeUrlInput = document.getElementById("youtubeUrlInput");
+    const youtubeApplyBtn = document.getElementById("youtubeApplyBtn");
+    const youtubeResetBtn = document.getElementById("youtubeResetBtn");
+    const youtubeUrlStatus = document.getElementById("youtubeUrlStatus");
     const lapColumn = document.getElementById("lapColumn");
     const lapPanelTitle = document.getElementById("lapPanelTitle");
     const lapPanelSummary = document.getElementById("lapPanelSummary");
+    const lapFilterPills = document.getElementById("lapFilterPills");
+    const lapColumnHandle = document.getElementById("lapColumnHandle");
+    const lapColWidth = document.getElementById("lapColWidth");
+    const lapColReset = document.getElementById("lapColReset");
+    const lapGroupBtn = document.getElementById("lapGroupBtn");
     const lapRowsBody = document.getElementById("lapRows");
     const lapTableWrap = document.getElementById("lapTableWrap");
     const lapDriverCol = document.querySelector(".lap-driver-col");
-    const lapSortHeader = document.getElementById("lapSortHeader");
+    const lapSortHeaders = Array.from(document.querySelectorAll("[data-lap-sort]"));
     const metaBox = document.getElementById("metaBox");
     const statusBadge = document.getElementById("statusBadge");
     const mainSplit = document.getElementById("mainSplit");
     let latestData = {{ cars: [], lap_history: [] }};
-    let lapSortDir = 1;
+    let lapSort = loadLapSort();
+    let lapDriverFilterSet = loadLapDriverFilter();
+    let lapGroupByDriver = localStorage.getItem(LAP_GROUP_STORAGE_KEY) === "1";
 
     function escapeHtml(value) {{
       return String(value)
@@ -1927,6 +2127,208 @@ def save_html_file(
         console.warn("ドライバー選択の復元に失敗", error);
       }}
       return new Set();
+    }}
+
+    function loadStringSet(storageKey) {{
+      try {{
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return new Set();
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return new Set(parsed.filter(Boolean));
+      }} catch (error) {{
+        console.warn("保存済みフィルタの復元に失敗", error);
+      }}
+      return new Set();
+    }}
+
+    function loadLapDriverFilter() {{
+      return loadStringSet(LAP_FILTER_STORAGE_KEY);
+    }}
+
+    function saveLapDriverFilter() {{
+      if (lapDriverFilterSet.size) {{
+        localStorage.setItem(LAP_FILTER_STORAGE_KEY, JSON.stringify(Array.from(lapDriverFilterSet)));
+      }} else {{
+        localStorage.removeItem(LAP_FILTER_STORAGE_KEY);
+      }}
+    }}
+
+    function loadLapSort() {{
+      try {{
+        const parsed = JSON.parse(localStorage.getItem(LAP_SORT_STORAGE_KEY) || "{{}}");
+        const key = ["lap", "time", "driver", "slot"].includes(parsed.key) ? parsed.key : "lap";
+        const dir = parsed.dir === -1 ? -1 : 1;
+        return {{ key, dir }};
+      }} catch (error) {{
+        console.warn("周回ソートの復元に失敗", error);
+        return {{ key: "lap", dir: 1 }};
+      }}
+    }}
+
+    function saveLapSort() {{
+      localStorage.setItem(LAP_SORT_STORAGE_KEY, JSON.stringify(lapSort));
+    }}
+
+    function applyVideoSize(rawSize, persist = true) {{
+      const size = Math.min(1400, Math.max(480, Number(rawSize) || 960));
+      videoFrame.style.setProperty("--video-max-width", `${{size}}px`);
+      videoSize.value = String(size);
+      videoSizeValue.textContent = `${{size}}px`;
+      if (persist) localStorage.setItem(VIDEO_SIZE_STORAGE_KEY, String(size));
+    }}
+
+    function extractYoutubeVideoId(value) {{
+      const text = String(value || "").trim();
+      if (/^[A-Za-z0-9_-]{{11}}$/.test(text)) return text;
+      if (!text) return "";
+
+      try {{
+        const withProtocol = text.includes("://") ? text : `https://${{text}}`;
+        const url = new URL(withProtocol);
+        const host = url.hostname.replace(/^www\\./, "");
+        const fromQuery = url.searchParams.get("v");
+        if (fromQuery && /^[A-Za-z0-9_-]{{11}}$/.test(fromQuery)) return fromQuery;
+        const parts = url.pathname.split("/").filter(Boolean);
+        if (host === "youtu.be" && parts[0] && /^[A-Za-z0-9_-]{{11}}$/.test(parts[0])) return parts[0];
+        for (const key of ["embed", "shorts", "live"]) {{
+          const index = parts.indexOf(key);
+          const id = index >= 0 ? parts[index + 1] : "";
+          if (id && /^[A-Za-z0-9_-]{{11}}$/.test(id)) return id;
+        }}
+      }} catch (error) {{
+        const match = text.match(/(?:v=|youtu\\.be\\/|embed\\/|shorts\\/|live\\/)([A-Za-z0-9_-]{{11}})/);
+        if (match) return match[1];
+      }}
+
+      return "";
+    }}
+
+    function youtubeWatchUrl(videoId) {{
+      return `https://www.youtube.com/watch?v=${{videoId}}`;
+    }}
+
+    function applyYoutubeUrl(rawValue, persist = true) {{
+      const value = String(rawValue || "").trim();
+      const videoId = extractYoutubeVideoId(value) || DEFAULT_YOUTUBE_VIDEO_ID;
+      youtubeFrame.src = `https://www.youtube.com/embed/${{encodeURIComponent(videoId)}}`;
+      youtubeUrlInput.value = value || youtubeWatchUrl(DEFAULT_YOUTUBE_VIDEO_ID);
+      youtubeUrlStatus.textContent = `反映中: ${{youtubeWatchUrl(videoId)}}`;
+      if (persist) {{
+        if (value) {{
+          localStorage.setItem(YOUTUBE_URL_STORAGE_KEY, value);
+        }} else {{
+          localStorage.removeItem(YOUTUBE_URL_STORAGE_KEY);
+        }}
+      }}
+      return videoId;
+    }}
+
+    function applyYoutubeInput() {{
+      const videoId = extractYoutubeVideoId(youtubeUrlInput.value);
+      if (!videoId) {{
+        youtubeUrlStatus.textContent = "YouTube URL または11文字の動画IDを入力してください。";
+        youtubeUrlInput.focus();
+        return;
+      }}
+      applyYoutubeUrl(youtubeUrlInput.value);
+    }}
+
+    function resetYoutubeUrl() {{
+      localStorage.removeItem(YOUTUBE_URL_STORAGE_KEY);
+      applyYoutubeUrl("", false);
+      youtubeUrlStatus.textContent = `既定に戻しました: ${{youtubeWatchUrl(DEFAULT_YOUTUBE_VIDEO_ID)}}`;
+    }}
+
+    function applyLapColWidth(rawWidth, persist = true) {{
+      const min = Number(lapColWidth.min) || 200;
+      const max = Number(lapColWidth.max) || 680;
+      const width = Math.min(max, Math.max(min, Number(rawWidth) || 260));
+      lapColumn.style.setProperty("--lap-col-width", `${{width}}px`);
+      lapColWidth.value = String(width);
+      if (persist) localStorage.setItem(LAP_COL_WIDTH_STORAGE_KEY, String(width));
+      clampLapColPos();
+    }}
+
+    function clampLapColPos() {{
+      if (!lapColumn.style.left && !lapColumn.style.top) return;
+      const rect = lapColumn.getBoundingClientRect();
+      const maxLeft = Math.max(0, window.innerWidth - rect.width - 8);
+      const maxTop = Math.max(0, window.innerHeight - 40);
+      const left = Math.min(maxLeft, Math.max(0, parseFloat(lapColumn.style.left) || 0));
+      const top = Math.min(maxTop, Math.max(0, parseFloat(lapColumn.style.top) || 0));
+      lapColumn.style.left = `${{left}}px`;
+      lapColumn.style.top = `${{top}}px`;
+    }}
+
+    function applyLapColPos(pos) {{
+      if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {{
+        lapColumn.style.left = `${{pos.left}}px`;
+        lapColumn.style.top = `${{pos.top}}px`;
+        lapColumn.style.right = "auto";
+      }} else {{
+        lapColumn.style.left = "";
+        lapColumn.style.top = "";
+        lapColumn.style.right = "";
+      }}
+    }}
+
+    function loadLapColPos() {{
+      try {{
+        const parsed = JSON.parse(localStorage.getItem(LAP_COL_POS_STORAGE_KEY) || "null");
+        if (parsed && Number.isFinite(parsed.left) && Number.isFinite(parsed.top)) return parsed;
+      }} catch (error) {{
+        console.warn("周回カラム位置の復元に失敗", error);
+      }}
+      return null;
+    }}
+
+    function saveLapColPos() {{
+      const left = parseFloat(lapColumn.style.left);
+      const top = parseFloat(lapColumn.style.top);
+      if (Number.isFinite(left) && Number.isFinite(top)) {{
+        localStorage.setItem(LAP_COL_POS_STORAGE_KEY, JSON.stringify({{ left, top }}));
+      }}
+    }}
+
+    function resetLapColPosition() {{
+      localStorage.removeItem(LAP_COL_POS_STORAGE_KEY);
+      localStorage.removeItem(LAP_COL_WIDTH_STORAGE_KEY);
+      applyLapColPos(null);
+      applyLapColWidth(260, false);
+    }}
+
+    function initLapColumnDrag() {{
+      let dragging = null;
+      lapColumnHandle.addEventListener("pointerdown", (event) => {{
+        if (event.target.closest("input, button, .lap-filter-pills")) return;
+        const rect = lapColumn.getBoundingClientRect();
+        dragging = {{ dx: event.clientX - rect.left, dy: event.clientY - rect.top }};
+        lapColumn.style.right = "auto";
+        lapColumn.style.left = `${{rect.left}}px`;
+        lapColumn.style.top = `${{rect.top}}px`;
+        lapColumn.classList.add("dragging");
+        lapColumnHandle.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      }});
+      lapColumnHandle.addEventListener("pointermove", (event) => {{
+        if (!dragging) return;
+        const rect = lapColumn.getBoundingClientRect();
+        const maxLeft = Math.max(0, window.innerWidth - rect.width - 8);
+        const maxTop = Math.max(0, window.innerHeight - 40);
+        const left = Math.min(maxLeft, Math.max(0, event.clientX - dragging.dx));
+        const top = Math.min(maxTop, Math.max(0, event.clientY - dragging.dy));
+        lapColumn.style.left = `${{left}}px`;
+        lapColumn.style.top = `${{top}}px`;
+      }});
+      const endDrag = (event) => {{
+        if (!dragging) return;
+        dragging = null;
+        lapColumn.classList.remove("dragging");
+        try {{ lapColumnHandle.releasePointerCapture(event.pointerId); }} catch (error) {{}}
+        saveLapColPos();
+      }};
+      lapColumnHandle.addEventListener("pointerup", endDrag);
+      lapColumnHandle.addEventListener("pointercancel", endDrag);
     }}
 
     let selectedDriverSet = loadSelectedDrivers();
@@ -2027,9 +2429,48 @@ def save_html_file(
       filterRows();
     }}
 
-    function updateLapSortHeader() {{
-      lapSortHeader.classList.toggle("sort-asc", lapSortDir === 1);
-      lapSortHeader.classList.toggle("sort-desc", lapSortDir === -1);
+    function updateLapSortHeaders() {{
+      for (const header of lapSortHeaders) {{
+        const active = header.dataset.lapSort === lapSort.key;
+        header.classList.toggle("sort-asc", active && lapSort.dir === 1);
+        header.classList.toggle("sort-desc", active && lapSort.dir === -1);
+      }}
+    }}
+
+    function lapSortValue(lap, key) {{
+      if (key === "time") return Number(lap.lap_time_ms) || 0;
+      if (key === "driver") return String(lap.driver_name || "");
+      if (key === "slot") return Number(lap.driver_slot) || 0;
+      return Number(lap.lap_no) || 0;
+    }}
+
+    function compareLapValues(a, b, key) {{
+      const av = lapSortValue(a, key);
+      const bv = lapSortValue(b, key);
+      if (typeof av === "string" || typeof bv === "string") {{
+        return String(av).localeCompare(String(bv), "ja");
+      }}
+      return av - bv;
+    }}
+
+    function visibleLapDrivers(drivers) {{
+      const allowed = new Set(drivers);
+      lapDriverFilterSet = new Set(Array.from(lapDriverFilterSet).filter((name) => allowed.has(name)));
+      if (!lapDriverFilterSet.size) return drivers;
+      const filtered = drivers.filter((name) => lapDriverFilterSet.has(name));
+      return filtered.length ? filtered : drivers;
+    }}
+
+    function renderLapDriverFilter(drivers) {{
+      if (drivers.length <= 1) {{
+        lapFilterPills.innerHTML = "";
+        return;
+      }}
+      const active = new Set(visibleLapDrivers(drivers));
+      lapFilterPills.innerHTML = drivers.map((name) => {{
+        const activeClass = active.has(name) ? "active" : "";
+        return `<button type="button" class="${{activeClass}}" data-driver="${{escapeHtml(name)}}">${{escapeHtml(name)}}</button>`;
+      }}).join("");
     }}
 
     function renderLapHistory() {{
@@ -2039,31 +2480,49 @@ def save_html_file(
         return;
       }}
 
-      const driverSet = new Set(drivers);
-      const laps = (latestData.lap_history || [])
-        .filter((lap) => driverSet.has(lap.driver_name) && matchesClass(lap.car_class || ""))
-        .sort((a, b) => {{
-          const byLap = lapSortDir * (Number(a.lap_no) - Number(b.lap_no));
-          return byLap !== 0 ? byLap : String(a.driver_name).localeCompare(String(b.driver_name), "ja");
-        }});
+      const visibleDrivers = visibleLapDrivers(drivers);
+      const driverSet = new Set(visibleDrivers);
+      const sortLaps = (list) => list.slice().sort((a, b) => {{
+        const primary = lapSort.dir * compareLapValues(a, b, lapSort.key);
+        if (primary !== 0) return primary;
+        const byLap = Number(a.lap_no) - Number(b.lap_no);
+        return byLap !== 0 ? byLap : String(a.driver_name).localeCompare(String(b.driver_name), "ja");
+      }});
+      const laps = sortLaps(
+        (latestData.lap_history || []).filter(
+          (lap) => driverSet.has(lap.driver_name) && matchesClass(lap.car_class || "")
+        )
+      );
 
       lapColumn.classList.remove("hidden");
       lapPanelTitle.textContent = drivers.length === 1
         ? `${{drivers[0]}} の周回タイム`
-        : `${{drivers.join(" / ")}} の周回タイム`;
-      lapDriverCol.classList.toggle("hidden", drivers.length <= 1);
+        : `${{visibleDrivers.join(" / ")}} の周回タイム`;
+      const multiDriver = drivers.length > 1;
+      lapDriverCol.classList.toggle("hidden", !multiDriver);
+      lapGroupBtn.classList.toggle("hidden", !multiDriver);
+      lapGroupBtn.classList.toggle("active", multiDriver && lapGroupByDriver);
+      renderLapDriverFilter(drivers);
+      updateLapSortHeaders();
       if (!laps.length) {{
         lapPanelSummary.textContent = "まだ周回データがありません（取得開始後に蓄積されます）";
         lapRowsBody.innerHTML = "";
         return;
       }}
 
-      const bestMs = Math.min(...laps.map((lap) => Number(lap.lap_time_ms)).filter((v) => v > 0));
-      lapPanelSummary.textContent = `全 ${{laps.length}} 周`;
+      const validMs = laps.map((lap) => Number(lap.lap_time_ms)).filter((v) => v > 0);
+      const bestMs = Math.min(...validMs);
+      const avgMs = validMs.length
+        ? validMs.reduce((sum, v) => sum + v, 0) / validMs.length
+        : 0;
+      const avgDisplay = avgMs ? `${{(avgMs / 1000).toFixed(3)}}秒` : "-";
+      lapPanelSummary.textContent = `全 ${{laps.length}} 周 / 平均 ${{avgDisplay}}`;
       const scrollTop = lapTableWrap.scrollTop;
-      const showDriver = drivers.length > 1;
-      lapRowsBody.innerHTML = laps.map((lap) => {{
-        const bestClass = Number(lap.lap_time_ms) === bestMs ? "lap-best" : "";
+      const showDriver = multiDriver;
+      const colSpan = showDriver ? 4 : 3;
+      const lapRowHtml = (lap) => {{
+        const lapMs = Number(lap.lap_time_ms);
+        const bestClass = lapMs === bestMs ? "lap-best" : "";
         const driverCell = showDriver
           ? `<td class="driver lap-driver-col">${{escapeHtml(lap.driver_name)}}</td>`
           : "";
@@ -2073,7 +2532,20 @@ def save_html_file(
   ${{driverCell}}
   <td class="num">${{escapeHtml(lap.driver_slot)}}</td>
 </tr>`;
-      }}).join("");
+      }};
+
+      if (showDriver && lapGroupByDriver) {{
+        const sections = [];
+        for (const name of visibleDrivers) {{
+          const driverLaps = sortLaps(laps.filter((lap) => lap.driver_name === name));
+          if (!driverLaps.length) continue;
+          sections.push(`<tr class="lap-group-row"><td colspan="${{colSpan}}">${{escapeHtml(name)}}（${{driverLaps.length}}周）</td></tr>`);
+          sections.push(driverLaps.map(lapRowHtml).join(""));
+        }}
+        lapRowsBody.innerHTML = sections.join("");
+      }} else {{
+        lapRowsBody.innerHTML = laps.map(lapRowHtml).join("");
+      }}
       lapTableWrap.scrollTop = scrollTop;
     }}
 
@@ -2135,12 +2607,53 @@ def save_html_file(
       const row = cell.closest("tr");
       toggleDriver(row?.dataset.driver || cell.textContent);
     }});
-    lapSortHeader.addEventListener("click", () => {{
-      lapSortDir *= -1;
-      updateLapSortHeader();
+    lapFilterPills.addEventListener("click", (event) => {{
+      const button = event.target.closest("button[data-driver]");
+      if (!button) return;
+      const drivers = selectedDrivers();
+      if (!lapDriverFilterSet.size) lapDriverFilterSet = new Set(drivers);
+      const name = button.dataset.driver;
+      if (lapDriverFilterSet.has(name)) {{
+        lapDriverFilterSet.delete(name);
+      }} else {{
+        lapDriverFilterSet.add(name);
+      }}
+      if (!lapDriverFilterSet.size) lapDriverFilterSet = new Set(drivers);
+      saveLapDriverFilter();
       renderLapHistory();
     }});
-    updateLapSortHeader();
+    for (const header of lapSortHeaders) {{
+      header.addEventListener("click", () => {{
+        const key = header.dataset.lapSort;
+        if (lapSort.key === key) {{
+          lapSort.dir *= -1;
+        }} else {{
+          lapSort = {{ key, dir: 1 }};
+        }}
+        saveLapSort();
+        renderLapHistory();
+      }});
+    }}
+    videoSize.addEventListener("input", () => applyVideoSize(videoSize.value));
+    applyVideoSize(localStorage.getItem(VIDEO_SIZE_STORAGE_KEY), false);
+    youtubeApplyBtn.addEventListener("click", applyYoutubeInput);
+    youtubeResetBtn.addEventListener("click", resetYoutubeUrl);
+    youtubeUrlInput.addEventListener("keydown", (event) => {{
+      if (event.key === "Enter") applyYoutubeInput();
+    }});
+    applyYoutubeUrl(localStorage.getItem(YOUTUBE_URL_STORAGE_KEY) || "", false);
+    lapColWidth.addEventListener("input", () => applyLapColWidth(lapColWidth.value));
+    lapColReset.addEventListener("click", resetLapColPosition);
+    lapGroupBtn.addEventListener("click", () => {{
+      lapGroupByDriver = !lapGroupByDriver;
+      localStorage.setItem(LAP_GROUP_STORAGE_KEY, lapGroupByDriver ? "1" : "0");
+      renderLapHistory();
+    }});
+    window.addEventListener("resize", clampLapColPos);
+    initLapColumnDrag();
+    applyLapColWidth(localStorage.getItem(LAP_COL_WIDTH_STORAGE_KEY), false);
+    applyLapColPos(loadLapColPos());
+    updateLapSortHeaders();
     if (window.__INITIAL_VIEW_DATA__) {{
       applyData(window.__INITIAL_VIEW_DATA__);
     }}
@@ -2184,6 +2697,7 @@ def save_drivers_html(
       </select>
       <input id="search" type="search" placeholder="ドライバー・車番・チーム名で検索...">
       <a class="nav-link" href="index.html">車両一覧</a>
+      <a class="nav-link" href="timing_live.xlsx" download>Excel出力</a>
       <div class="info">走行中: <span id="count">0</span> 件 / <span id="pollInfo">{interval}秒ごとに自動更新</span></div>
     </div>
 
