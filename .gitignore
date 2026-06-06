@@ -1,0 +1,10 @@
+# Generated timing data
+data/*.json
+data/*.csv
+data/*.html
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
