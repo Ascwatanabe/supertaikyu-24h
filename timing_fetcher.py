@@ -1611,6 +1611,18 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       width: 100%;
       min-width: 0;
     }}
+    .cars-panel table tbody td:nth-child(1) {{ color: #ffd54a; }}
+    .cars-panel table tbody td:nth-child(2) {{ color: #b9a3ff; }}
+    .cars-panel table tbody td:nth-child(3) {{ color: #6fe3ff; }}
+    .cars-panel table tbody td:nth-child(5) {{ color: #ffb067; }}
+    .cars-panel table tbody td:nth-child(6) {{ color: #a7d98f; }}
+    .cars-panel table tbody td:nth-child(8),
+    .cars-panel table tbody td:nth-child(9),
+    .cars-panel table tbody td:nth-child(10),
+    .cars-panel table tbody td:nth-child(11) {{ color: #ffffff; }}
+    .cars-panel table tbody td:nth-child(12) {{ color: #7fb4ff; }}
+    .cars-panel table tbody td:nth-child(13) {{ color: #f4a3c4; }}
+    .cars-panel table tbody td:nth-child(14) {{ color: #6fe0c8; }}
     .main-split.layout-horizontal .data-panel #tableWrap,
     .main-split.layout-vertical .data-panel #tableWrap {{
       max-height: calc(100vh - 240px);
@@ -2692,11 +2704,14 @@ def save_drivers_html(
 
     <div class="toolbar">
       <select id="classFilter"></select>
+      <select id="carNoFilter">
+        <option value="">車番で絞り込み</option>
+      </select>
       <select id="driverFilter">
         <option value="">走行中ドライバー一覧</option>
       </select>
       <input id="search" type="search" placeholder="ドライバー・車番・チーム名で検索...">
-      <a class="nav-link" href="index.html">車両一覧</a>
+      <a class="nav-link" href="index.html">← ダッシュボードに戻る</a>
       <a class="nav-link" href="timing_live.xlsx" download>Excel出力</a>
       <div class="info">走行中: <span id="count">0</span> 件 / <span id="pollInfo">{interval}秒ごとに自動更新</span></div>
     </div>
@@ -2735,6 +2750,7 @@ def save_drivers_html(
             <tr>
               <th id="lapSortHeader" class="sortable sort-asc">Lap<span class="sort-icon"></span></th>
               <th>Time</th>
+              <th id="driverTh">Driver</th>
               <th>No.</th>
               <th>Slot</th>
               <th>記録時刻</th>
@@ -2758,7 +2774,9 @@ def save_drivers_html(
     const CLASS_STORAGE_KEY = "st_selected_class";
     const POLL_INTERVAL = {interval} * 1000;
     const classFilter = document.getElementById("classFilter");
+    const carNoFilter = document.getElementById("carNoFilter");
     const driverFilter = document.getElementById("driverFilter");
+    const driverTh = document.getElementById("driverTh");
     const search = document.getElementById("search");
     const rowsBody = document.getElementById("rows");
     const count = document.getElementById("count");
@@ -2838,6 +2856,28 @@ def save_drivers_html(
       if (selected && sorted.includes(selected)) driverFilter.value = selected;
     }}
 
+    function rebuildCarNoFilter() {{
+      const selected = carNoFilter.value;
+      const carNos = new Set();
+      // 走行中ドライバーの車番を収集
+      for (const row of latestData.drivers || []) {{
+        if (matchesClass(row.car_class)) carNos.add(String(row.car_no));
+      }}
+      // ラップ履歴の車番を収集
+      for (const lap of latestData.lap_history || []) {{
+        if (matchesClass(lap.car_class || "")) carNos.add(String(lap.car_no));
+      }}
+      const sorted = Array.from(carNos).sort((a, b) => Number(a) - Number(b));
+      carNoFilter.innerHTML = '<option value="">車番で絞り込み</option>';
+      for (const no of sorted) {{
+        const option = document.createElement("option");
+        option.value = no;
+        option.textContent = `#${{no}}`;
+        carNoFilter.appendChild(option);
+      }}
+      if (selected && sorted.includes(selected)) carNoFilter.value = selected;
+    }}
+
     function renderRunningTable() {{
       const rows = runningDrivers();
       const html = rows.map((row) => {{
@@ -2845,7 +2885,7 @@ def save_drivers_html(
         const bestClass = row.best_lap_ms > 0 ? "lap-best" : "";
         const teamClass = TEAM_CAR_NOS.includes(String(row.car_no)) ? "row-team" : "";
         const rowClass = ["row-live", teamClass].filter(Boolean).join(" ");
-        return `<tr class="${{rowClass}}" data-driver="${{escapeHtml(row.driver_name)}}" data-class="${{escapeHtml(row.car_class)}}" data-search="${{escapeHtml(searchText)}}">
+        return `<tr class="${{rowClass}}" data-driver="${{escapeHtml(row.driver_name)}}" data-carno="${{escapeHtml(String(row.car_no))}}" data-class="${{escapeHtml(row.car_class)}}" data-search="${{escapeHtml(searchText)}}">
   <td class="driver sticky-col sticky-col-1">${{escapeHtml(row.driver_name)}}</td>
   <td class="num sticky-col sticky-col-2">${{escapeHtml(row.driver_slot)}}</td>
   <td class="current sticky-col sticky-col-3"><span class="current-badge">走行中</span></td>
@@ -2878,17 +2918,30 @@ def save_drivers_html(
 
     function renderLapHistory() {{
       const selectedDriver = driverFilter.value;
-      if (!selectedDriver) {{
+      const selectedCarNo = carNoFilter.value;
+
+      // 車番・ドライバーどちらも未選択なら非表示
+      if (!selectedDriver && !selectedCarNo) {{
         lapPanel.classList.add("hidden");
         return;
       }}
 
+      // 車番フィルタ時はドライバー列を表示、ドライバーフィルタのみの場合は非表示
+      const showDriverCol = !!selectedCarNo;
+      driverTh.classList.toggle("hidden", !showDriverCol);
+
       const laps = (latestData.lap_history || [])
-        .filter((lap) => lap.driver_name === selectedDriver && matchesClass(lap.car_class || ""))
+        .filter((lap) => {{
+          const classOk = matchesClass(lap.car_class || "");
+          const driverOk = !selectedDriver || lap.driver_name === selectedDriver;
+          const carOk = !selectedCarNo || String(lap.car_no) === selectedCarNo;
+          return classOk && driverOk && carOk;
+        }})
         .sort((a, b) => lapSortDir * (Number(a.lap_no) - Number(b.lap_no)));
 
       lapPanel.classList.remove("hidden");
-      lapPanelTitle.textContent = `${{selectedDriver}} の周回タイム`;
+      const label = selectedCarNo ? `#${{selectedCarNo}}` : selectedDriver;
+      lapPanelTitle.textContent = `${{label}} の周回タイム`;
       if (!laps.length) {{
         lapPanelSummary.textContent = "まだ周回データがありません（取得開始後に蓄積されます）";
         lapRowsBody.innerHTML = "";
@@ -2900,9 +2953,13 @@ def save_drivers_html(
       const scrollTop = lapTableWrap.scrollTop;
       lapRowsBody.innerHTML = laps.map((lap) => {{
         const bestClass = Number(lap.lap_time_ms) === bestMs ? "lap-best" : "";
+        const driverCell = showDriverCol
+          ? `<td class="driver">${{escapeHtml(lap.driver_name || "")}}</td>`
+          : `<td class="hidden"></td>`;
         return `<tr>
   <td class="num">${{escapeHtml(lap.lap_no)}}</td>
   <td class="lap ${{bestClass}}">${{escapeHtml(lap.lap_time)}}</td>
+  ${{driverCell}}
   <td class="num car-no">${{escapeHtml(lap.car_no)}}</td>
   <td class="num">${{escapeHtml(lap.driver_slot)}}</td>
   <td>${{escapeHtml(lap.recorded_at || "")}}</td>
@@ -2913,14 +2970,17 @@ def save_drivers_html(
 
     function filterRows() {{
       const selectedDriver = driverFilter.value;
+      const selectedCarNo = carNoFilter.value;
       const query = search.value.trim().toLowerCase();
       let visible = 0;
       for (const row of rowsBody.querySelectorAll("tr")) {{
         const driverName = row.dataset.driver || "";
+        const rowCarNo = row.dataset.carno || "";
         const haystack = (row.dataset.search || "").toLowerCase();
         const matchDriver = !selectedDriver || driverName === selectedDriver;
+        const matchCarNo = !selectedCarNo || rowCarNo === selectedCarNo;
         const matchSearch = !query || haystack.includes(query);
-        const show = matchDriver && matchSearch;
+        const show = matchDriver && matchCarNo && matchSearch;
         row.classList.toggle("hidden", !show);
         if (show) visible++;
       }}
@@ -2933,6 +2993,7 @@ def save_drivers_html(
       latestData = data;
       rebuildClassFilter();
       rebuildDriverFilter();
+      rebuildCarNoFilter();
       renderRunningTable();
       updateMeta();
     }}
@@ -2950,10 +3011,20 @@ def save_drivers_html(
     classFilter.addEventListener("change", () => {{
       localStorage.setItem(CLASS_STORAGE_KEY, classFilter.value);
       rebuildDriverFilter();
+      rebuildCarNoFilter();
       renderRunningTable();
       updateMeta();
     }});
-    driverFilter.addEventListener("change", filterRows);
+    // 車番を選んだらドライバーフィルタをリセット（排他）
+    carNoFilter.addEventListener("change", () => {{
+      if (carNoFilter.value) driverFilter.value = "";
+      filterRows();
+    }});
+    // ドライバーを選んだら車番フィルタをリセット（排他）
+    driverFilter.addEventListener("change", () => {{
+      if (driverFilter.value) carNoFilter.value = "";
+      filterRows();
+    }});
     search.addEventListener("input", filterRows);
     lapSortHeader.addEventListener("click", () => {{
       lapSortDir *= -1;
