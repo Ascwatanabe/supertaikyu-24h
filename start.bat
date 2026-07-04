@@ -26,6 +26,22 @@ echo.
 
 
 
+where cloudflared >nul 2>&1 && (
+
+  echo.
+
+  echo [トンネル] cloudflared を起動しています...
+
+  echo [トンネル] 外部公開URLは別ウィンドウに表示されます。チームに共有してください。
+
+  echo.
+
+  start "Cloudflare Tunnel" cloudflared tunnel --url http://localhost:8765
+
+)
+
+
+
 python timing_fetcher.py --history --excel --html --quiet --open-browser
 
 if errorlevel 1 (
