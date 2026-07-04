@@ -14,9 +14,9 @@ echo.
 
 echo AndLegal Racing タイミング取得を開始します...
 
-echo 車両一覧: http://127.0.0.1:8765/data/index.html
+echo 車両一覧: http://127.0.0.1:8765/index.html
 
-echo ドライバー一覧: http://127.0.0.1:8765/data/drivers.html
+echo ドライバー一覧: http://127.0.0.1:8765/drivers.html
 
 echo Excel出力: data\timing_live.xlsx
 

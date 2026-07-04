@@ -12,6 +12,7 @@ import json
 import sys
 import threading
 import time
+import urllib.parse
 import webbrowser
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -21,7 +22,28 @@ from typing import Any
 import requests
 
 APP_DIR = Path(__file__).resolve().parent
-BASE_URL = "https://www.supertaikyu.live/json"
+
+# --- config.json からURLを読み込む（なければデフォルト値を使用） ---
+_CONFIG_PATH = APP_DIR / "config.json"
+_config: dict[str, str] = {}
+if _CONFIG_PATH.exists():
+    try:
+        _config = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+
+def _normalize_base_url(url: str) -> str:
+    """末尾スラッシュと拡張子付きファイル名を除去してフォルダURLに整形する。"""
+    import re
+    url = url.rstrip("/")
+    last = url.rsplit("/", 1)[-1]
+    if re.search(r"\.[a-zA-Z0-9]{1,5}$", last):
+        url = url.rsplit("/", 1)[0]
+    return url
+
+
+BASE_URL = _normalize_base_url(_config.get("base_url", "https://www.supertaikyu.live/json"))
 DEFAULT_CLASS = "ST-5F"
 DEFAULT_INTERVAL = 5
 DEFAULT_OUTPUT_DIR = APP_DIR / "data"
@@ -32,7 +54,7 @@ MAX_RETRIES = 3
 TEAM_NAME = "AndLegal Racing"
 TEAM_TAGLINE = "ONE LAP AHEAD — ともに先へ"
 TEAM_X_URL = "https://x.com/AndLegal_Racing"
-TEAM_YOUTUBE_VIDEO_ID = "RDINupchH9Y"
+TEAM_YOUTUBE_VIDEO_ID = _config.get("youtube_video_id", "RDINupchH9Y")
 TEAM_CAR_NOS = ("821", "822")
 TEAM_LOGO_ASSET = "../assets/team-logo.jpg"
 TEAM_BANNER_ASSET = "../assets/team-banner.jpg"
@@ -359,7 +381,17 @@ def save_view_data_json(
     default_class: str,
 ) -> Path:
     history_doc = read_json_file(lap_history_path(output_dir))
-    lap_history = history_doc.get("laps", [])
+    lap_history: list[dict[str, Any]] = history_doc.get("laps", [])
+    # ブラウザ転送量を抑えるため、車番ごとに最新200周を上限として絞り込む
+    _VIEW_LAP_LIMIT = 200
+    _by_car: dict[str, list[dict[str, Any]]] = {}
+    for _lap in lap_history:
+        _by_car.setdefault(str(_lap.get("car_no", "")), []).append(_lap)
+    lap_history_view: list[dict[str, Any]] = []
+    for _laps in _by_car.values():
+        lap_history_view.extend(
+            sorted(_laps, key=lambda l: int(l.get("lap_no", 0)))[-_VIEW_LAP_LIMIT:]
+        )
     payload = {
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "update_time_display": format_update_time(live.get("UpdateTime", "")),
@@ -371,7 +403,7 @@ def save_view_data_json(
         "interval": interval,
         "cars": [asdict(row) for row in rows],
         "drivers": [asdict(row) for row in driver_rows],
-        "lap_history": lap_history,
+        "lap_history": lap_history_view,
     }
     path = view_data_path(output_dir)
     write_json_file(path, payload)
@@ -1529,6 +1561,48 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       margin-top: 8px;
       color: var(--muted);
     }}
+    .data-url-settings {{
+      margin-top: 16px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 12px;
+    }}
+    .data-url-settings h2 {{
+      margin: 0 0 8px;
+      color: var(--text-strong);
+    }}
+    .data-url-settings-row {{
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }}
+    .data-url-settings input {{
+      flex: 1 1 420px;
+      min-width: 240px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-2);
+      color: var(--text);
+    }}
+    .data-url-settings button {{
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(225, 6, 0, 0.06);
+      color: #b91c1c;
+      padding: 10px 14px;
+      cursor: pointer;
+    }}
+    .data-url-settings button:hover {{
+      background: rgba(225, 6, 0, 0.12);
+      color: #7f1d1d;
+    }}
+    .data-url-settings .summary {{
+      margin-top: 8px;
+      color: var(--muted);
+    }}
     .main-split.layout-horizontal .video-panel {{
       flex: 0 0 48%;
       min-width: 300px;
@@ -1867,18 +1941,243 @@ def embed_view_data_script(view_data: dict[str, Any] | None) -> str:
     return f"<script>window.__INITIAL_VIEW_DATA__ = {payload};</script>\n"
 
 
+class DashboardHTTPHandler(http.server.SimpleHTTPRequestHandler):
+    """Serve data/ as web root and assets/ at /assets/.
+
+    Routing rules:
+      /                       → data/index.html (redirect)
+      /assets/<file>          → assets/<file>
+      /data/<file>            → data/<file>  (local URL backward compat)
+      /<anything else>        → data/<anything else>
+
+    Files outside data/ and assets/ (source code, .git/, etc.) are never served.
+    """
+
+    _data_dir: Path = APP_DIR / "data"
+    _assets_dir: Path = APP_DIR / "assets"
+
+    def do_GET(self) -> None:
+        if self.path in ("/", ""):
+            self.send_response(302)
+            self.send_header("Location", "/index.html")
+            self.end_headers()
+            return
+        super().do_GET()
+
+    def do_HEAD(self) -> None:
+        if self.path in ("/", ""):
+            self.send_response(302)
+            self.send_header("Location", "/index.html")
+            self.end_headers()
+            return
+        super().do_HEAD()
+
+    def do_POST(self) -> None:
+        if self.path == "/api/config":
+            self._handle_config_post()
+        elif self.path == "/api/clear-data":
+            self._handle_clear_data()
+        elif self.path == "/api/discover-url":
+            self._handle_discover_url()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def _handle_config_post(self) -> None:
+        global BASE_URL, TEAM_YOUTUBE_VIDEO_ID
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            data = json.loads(body)
+        except Exception:
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"ok":false,"error":"invalid request"}')
+            return
+
+        config_path = APP_DIR / "config.json"
+        try:
+            config: dict[str, str] = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+        except Exception:
+            config = {}
+
+        if "base_url" in data and isinstance(data["base_url"], str):
+            BASE_URL = _normalize_base_url(data["base_url"])
+            config["base_url"] = BASE_URL
+        if "youtube_video_id" in data and isinstance(data["youtube_video_id"], str):
+            TEAM_YOUTUBE_VIDEO_ID = data["youtube_video_id"]
+            config["youtube_video_id"] = TEAM_YOUTUBE_VIDEO_ID
+
+        try:
+            config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(json.dumps({"ok": True, "base_url": BASE_URL, "youtube_video_id": TEAM_YOUTUBE_VIDEO_ID}).encode())
+
+    def _handle_clear_data(self) -> None:
+        output_dir = DEFAULT_OUTPUT_DIR
+        cleared: list[str] = []
+        errors: list[str] = []
+
+        def reset_json(path: Path, content: str) -> None:
+            try:
+                path.write_text(content, encoding="utf-8")
+                cleared.append(path.name)
+            except Exception as exc:
+                errors.append(f"{path.name}: {exc}")
+
+        def remove_file(path: Path) -> None:
+            try:
+                if path.exists():
+                    path.unlink()
+                    cleared.append(path.name)
+            except Exception as exc:
+                errors.append(f"{path.name}: {exc}")
+
+        reset_json(lap_history_path(output_dir), '{"laps": []}')
+        reset_json(lap_state_path(output_dir), "{}")
+        reset_json(sector_state_path(output_dir), "{}")
+        remove_file(latest_json_path(output_dir))
+        remove_file(latest_csv_path(output_dir))
+        remove_file(history_csv_path(output_dir))
+        remove_file(view_data_path(output_dir))
+        remove_file(raw_snapshots_csv_path(output_dir))
+        remove_file(drivers_running_csv_path(output_dir))
+        remove_file(live_xlsx_path(output_dir))
+
+        ok = not errors
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(json.dumps({"ok": ok, "cleared": cleared, "errors": errors}).encode())
+
+    def _handle_discover_url(self) -> None:
+        import re as _re
+        session = requests.Session()
+        session.headers.update({"User-Agent": "Mozilla/5.0"})
+
+        def probe(url: str) -> bool:
+            try:
+                r = session.get(f"{url}/master.json", timeout=8)
+                return r.status_code == 200
+            except Exception:
+                return False
+
+        def extract_candidates_from_text(text: str, base_origin: str = "https://www.supertaikyu.live") -> list[str]:
+            found: list[str] = []
+            # https://... を含むJSONパスを探す
+            for raw in _re.findall(r'https?://[^\s\'"<>]+', text):
+                raw = raw.rstrip("/.,;)'\"")
+                last = raw.rsplit("/", 1)[-1]
+                if _re.search(r"[.][a-zA-Z0-9]{1,5}$", last):
+                    raw = raw.rsplit("/", 1)[0]
+                if "supertaikyu" in raw and raw not in found:
+                    found.append(raw)
+            # 相対パス /xxx の形を探す
+            for rel in _re.findall(r'["\'](/[^"\'?#\s]+)["\']', text):
+                rel = rel.rstrip("/")
+                last = rel.rsplit("/", 1)[-1]
+                if _re.search(r"[.][a-zA-Z0-9]{1,5}$", last):
+                    rel = rel.rsplit("/", 1)[0]
+                full = base_origin + rel
+                if full not in found:
+                    found.append(full)
+            return found
+
+        def scan_page(url: str) -> list[str]:
+            result: list[str] = []
+            try:
+                resp = session.get(url, timeout=10)
+                text = resp.text
+                result.extend(extract_candidates_from_text(text))
+                # script タグを再帰的にスキャン
+                for src in _re.findall(r'src=["\']([^"\']+)["\']', text):
+                    if src.startswith("http"):
+                        script_url = src
+                    elif src.startswith("/"):
+                        script_url = "https://www.supertaikyu.live" + src
+                    else:
+                        continue
+                    try:
+                        js = session.get(script_url, timeout=8).text
+                        result.extend(extract_candidates_from_text(js))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            return result
+
+        # 既知の候補（優先順）
+        candidates: list[str] = [
+            "https://www.supertaikyu.live/json",
+            "https://www.supertaikyu.live/timings/json",
+            "https://www.supertaikyu.live/timings/data",
+            "https://www.supertaikyu.live/timings/api",
+            "https://www.supertaikyu.live/api/json",
+            "https://www.supertaikyu.live/data",
+        ]
+
+        # トップページと /timings/ ページを両方スキャン
+        for page_url in [
+            "https://www.supertaikyu.live",
+            "https://www.supertaikyu.live/timings/",
+        ]:
+            for c in scan_page(page_url):
+                if c not in candidates:
+                    candidates.append(c)
+
+        found_url: str | None = None
+        for url in candidates:
+            if probe(url):
+                found_url = url
+                break
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(json.dumps({
+            "ok": found_url is not None,
+            "url": found_url,
+            "candidates": candidates,
+        }).encode())
+
+    def translate_path(self, path: str) -> str:
+        path = path.split("?", 1)[0].split("#", 1)[0]
+        path = urllib.parse.unquote(path, errors="surrogatepass")
+        parts = [p for p in path.split("/") if p and p not in (".", "..")]
+
+        if parts and parts[0] == "assets":
+            sub = "/".join(parts[1:])
+            return str(self._assets_dir / sub) if sub else str(self._assets_dir)
+
+        if parts and parts[0] == "data":
+            parts = parts[1:]
+
+        if not parts:
+            return str(self._data_dir / "index.html")
+
+        return str(self._data_dir / "/".join(parts))
+
+    def log_message(self, format: str, *args: Any) -> None:
+        super().log_message(format, *args)
+
+
 def start_static_server(root_dir: Path, port: int) -> http.server.ThreadingHTTPServer:
-    handler = functools.partial(
-        http.server.SimpleHTTPRequestHandler,
-        directory=str(root_dir),
-    )
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), DashboardHTTPHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server
 
 
-def dashboard_page_url(port: int, page: str = "data/index.html") -> str:
+def dashboard_page_url(port: int, page: str = "index.html") -> str:
     return f"http://127.0.0.1:{port}/{page}"
 
 
@@ -2016,6 +2315,19 @@ def save_html_file(
       </div>
   </div>
 
+    <section class="data-url-settings" aria-label="データ取得URL設定">
+      <h2>データ取得URL設定</h2>
+      <div class="data-url-settings-row">
+        <input id="dataUrlInput" type="url" list="dataUrlHistory" placeholder="例: https://www.supertaikyu.live/json（末尾はフォルダURLを指定）">
+        <datalist id="dataUrlHistory"></datalist>
+        <button type="button" id="dataUrlApplyBtn">反映</button>
+        <button type="button" id="dataUrlDiscoverBtn">自動検出</button>
+        <button type="button" id="dataUrlResetBtn">既定に戻す</button>
+        <button type="button" id="clearDataBtn" style="background:rgba(220,38,38,0.1);color:#b91c1c;border:1px solid #fca5a5;">走行データを全て削除</button>
+      </div>
+      <div class="summary" id="dataUrlStatus">URLを入力して反映できます。</div>
+    </section>
+
     <section class="youtube-settings" aria-label="YouTube URL設定">
       <h2>YouTube URL設定</h2>
       <div class="youtube-settings-row">
@@ -2032,6 +2344,7 @@ def save_html_file(
     const DEFAULT_CLASS = "{html.escape(default_class)}";
     const TEAM_CAR_NOS = {json.dumps(list(TEAM_CAR_NOS))};
     const DEFAULT_YOUTUBE_VIDEO_ID = "{html.escape(TEAM_YOUTUBE_VIDEO_ID)}";
+    const DEFAULT_BASE_URL = "{html.escape(BASE_URL)}";
     const CLASS_STORAGE_KEY = "st_selected_class";
     const DRIVER_STORAGE_KEY = "st_index_selected_drivers";
     const LAP_FILTER_STORAGE_KEY = "st_index_lap_driver_filter";
@@ -2057,6 +2370,33 @@ def save_html_file(
     const youtubeApplyBtn = document.getElementById("youtubeApplyBtn");
     const youtubeResetBtn = document.getElementById("youtubeResetBtn");
     const youtubeUrlStatus = document.getElementById("youtubeUrlStatus");
+    const dataUrlInput = document.getElementById("dataUrlInput");
+    const dataUrlHistory = document.getElementById("dataUrlHistory");
+    const dataUrlApplyBtn = document.getElementById("dataUrlApplyBtn");
+    const dataUrlDiscoverBtn = document.getElementById("dataUrlDiscoverBtn");
+    const dataUrlResetBtn = document.getElementById("dataUrlResetBtn");
+    const dataUrlStatus = document.getElementById("dataUrlStatus");
+    const clearDataBtn = document.getElementById("clearDataBtn");
+    const DATA_URL_HISTORY_KEY = "st_data_url_history";
+    const DATA_URL_HISTORY_MAX = 5;
+
+    function loadDataUrlHistory() {{
+      try {{
+        return JSON.parse(localStorage.getItem(DATA_URL_HISTORY_KEY) || "[]");
+      }} catch (e) {{ return []; }}
+    }}
+
+    function saveDataUrlHistory(url) {{
+      const history = loadDataUrlHistory().filter((u) => u !== url);
+      history.unshift(url);
+      localStorage.setItem(DATA_URL_HISTORY_KEY, JSON.stringify(history.slice(0, DATA_URL_HISTORY_MAX)));
+      renderDataUrlHistory();
+    }}
+
+    function renderDataUrlHistory() {{
+      const history = loadDataUrlHistory();
+      dataUrlHistory.innerHTML = history.map((u) => `<option value="${{u}}"></option>`).join("");
+    }}
     const lapColumn = document.getElementById("lapColumn");
     const lapPanelTitle = document.getElementById("lapPanelTitle");
     const lapPanelSummary = document.getElementById("lapPanelSummary");
@@ -2196,6 +2536,44 @@ def save_html_file(
 
     function youtubeWatchUrl(videoId) {{
       return `https://www.youtube.com/watch?v=${{videoId}}`;
+    }}
+
+    async function postConfig(payload) {{
+      const res = await fetch("/api/config", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify(payload),
+      }});
+      return res.json();
+    }}
+
+    function normalizeBaseUrl(raw) {{
+      let url = raw.trim().replace(/[/]+$/, "");
+      const lastPart = url.split("/").pop() || "";
+      if (/[.][a-zA-Z0-9]{{1,5}}$/.test(lastPart)) {{
+        const stripped = url.substring(0, url.lastIndexOf("/"));
+        return {{ url: stripped, removed: lastPart }};
+      }}
+      return {{ url, removed: null }};
+    }}
+
+    async function applyDataUrl(rawUrl) {{
+      const {{ url, removed }} = normalizeBaseUrl(rawUrl);
+      dataUrlInput.value = url;
+      dataUrlStatus.textContent = "反映中...";
+      try {{
+        const result = await postConfig({{ base_url: url }});
+        if (result.ok) {{
+          const removeNote = removed ? `（「/${{removed}}」を自動除去）` : "";
+          dataUrlStatus.textContent = `反映しました。 ${{url}} ${{removeNote}}`;
+          dataUrlStatus.style.color = "var(--accent, #16a34a)";
+          saveDataUrlHistory(url);
+        }} else {{
+          dataUrlStatus.textContent = "反映に失敗しました。";
+        }}
+      }} catch (e) {{
+        dataUrlStatus.textContent = `エラー: ${{e.message}}`;
+      }}
     }}
 
     function applyYoutubeUrl(rawValue, persist = true) {{
@@ -2633,6 +3011,67 @@ def save_html_file(
       if (event.key === "Enter") applyYoutubeInput();
     }});
     applyYoutubeUrl(localStorage.getItem(YOUTUBE_URL_STORAGE_KEY) || "", false);
+    renderDataUrlHistory();
+    dataUrlInput.value = DEFAULT_BASE_URL;
+    dataUrlStatus.textContent = `現在のURL: ${{DEFAULT_BASE_URL}}`;
+    dataUrlStatus.style.color = "";
+    dataUrlApplyBtn.addEventListener("click", () => {{
+      const url = dataUrlInput.value.trim();
+      if (!url) {{
+        dataUrlStatus.textContent = "URLを入力してください。";
+        dataUrlInput.focus();
+        return;
+      }}
+      applyDataUrl(url);
+    }});
+    dataUrlResetBtn.addEventListener("click", () => {{
+      dataUrlInput.value = DEFAULT_BASE_URL;
+      applyDataUrl(DEFAULT_BASE_URL);
+    }});
+    dataUrlInput.addEventListener("keydown", (event) => {{
+      if (event.key === "Enter") dataUrlApplyBtn.click();
+    }});
+    dataUrlDiscoverBtn.addEventListener("click", async () => {{
+      dataUrlDiscoverBtn.disabled = true;
+      dataUrlStatus.textContent = "supertaikyu.live を検索中...";
+      try {{
+        const res = await fetch("/api/discover-url", {{ method: "POST" }});
+        const result = await res.json();
+        if (result.ok && result.url) {{
+          dataUrlInput.value = result.url;
+          await applyDataUrl(result.url);
+          dataUrlStatus.textContent = `自動検出しました。 ${{result.url}}`;
+          dataUrlStatus.style.color = "var(--accent, #16a34a)";
+        }} else {{
+          dataUrlStatus.textContent = `URLを自動検出できませんでした。手動で入力してください。`;
+          dataUrlStatus.style.color = "#b91c1c";
+        }}
+      }} catch (e) {{
+        dataUrlStatus.textContent = `エラー: ${{e.message}}`;
+      }} finally {{
+        dataUrlDiscoverBtn.disabled = false;
+      }}
+    }});
+    clearDataBtn.addEventListener("click", async () => {{
+      if (!confirm("サーバー上の走行データ（ラップ履歴・タイミングデータ等）を全て削除します。よろしいですか？")) return;
+      clearDataBtn.disabled = true;
+      dataUrlStatus.textContent = "削除中...";
+      try {{
+        const res = await fetch("/api/clear-data", {{ method: "POST" }});
+        const result = await res.json();
+        if (result.ok) {{
+          dataUrlStatus.textContent = `削除完了（${{result.cleared.length}} ファイル）`;
+          latestData = {{ cars: [], lap_history: [] }};
+          renderLapHistory();
+        }} else {{
+          dataUrlStatus.textContent = `エラー: ${{result.errors.join(", ")}}`;
+        }}
+      }} catch (e) {{
+        dataUrlStatus.textContent = `エラー: ${{e.message}}`;
+      }} finally {{
+        clearDataBtn.disabled = false;
+      }}
+    }});
     lapColWidth.addEventListener("input", () => applyLapColWidth(lapColWidth.value));
     lapColReset.addEventListener("click", resetLapColPosition);
     lapGroupBtn.addEventListener("click", () => {{
@@ -3171,6 +3610,9 @@ def run_watch(args: argparse.Namespace) -> int:
 
     browser_opened = False
     if args.html:
+        # HTTPサーバー起動前にHTMLを生成しておく（設定画面をすぐ使えるようにする）
+        save_html_file(args.output_dir, args.interval, args.class_filter)
+        save_drivers_html(args.output_dir, args.interval, args.class_filter)
         start_static_server(APP_DIR, args.http_port)
         if not args.quiet:
             print(f"ダッシュボード: {dashboard_page_url(args.http_port)}")
