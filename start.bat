@@ -32,11 +32,7 @@ where cloudflared >nul 2>&1 && (
 
   echo [トンネル] cloudflared を起動しています...
 
-  echo [トンネル] 外部公開URLは別ウィンドウに表示されます。チームに共有してください。
-
-  echo.
-
-  start "Cloudflare Tunnel" cloudflared tunnel --url http://localhost:8765
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0_tunnel_helper.ps1"
 
 )
 
