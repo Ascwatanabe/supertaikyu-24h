@@ -1123,72 +1123,47 @@ def export_live_xlsx(
 
 
 def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False) -> str:
-    sticky_panel_bg = "#3a2f36" if drivers_page else ""
-    sticky_live_bg = "#46343b" if drivers_page else ""
     sticky_rules = ""
     if drivers_page:
-        sticky_rules = f"""
-    #tableWrap {{
-      max-height: calc(100vh - 220px);
-    }}
-    .sticky-col {{
-      position: sticky;
-      background: {sticky_panel_bg};
-    }}
-    tr.row-live .sticky-col {{ background: {sticky_live_bg}; }}
-    tr.row-team .sticky-col {{ background: #523a42; }}
-    thead .sticky-col {{
-      background: #5a3640;
-      z-index: 4;
-    }}
-    .sticky-col-1 {{
-      left: 0;
-      min-width: 160px;
-      max-width: 160px;
-    }}
-    .sticky-col-2 {{
-      left: 160px;
-      min-width: 64px;
-      max-width: 64px;
-    }}
-    .sticky-col-3 {{
-      left: 224px;
-      min-width: 88px;
-      max-width: 88px;
-      box-shadow: 4px 0 8px rgba(0, 0, 0, 0.35);
-    }}"""
+        sticky_rules = """
+    #tableWrap { max-height: calc(100vh - 220px); }
+    .sticky-col { position: sticky; background: #f8fafc; }
+    tr.row-live .sticky-col { background: rgba(225, 6, 0, 0.07); }
+    tr.row-team .sticky-col { background: rgba(225, 6, 0, 0.12); }
+    thead .sticky-col { background: #f1f5f9; z-index: 4; }
+    .sticky-col-1 { left: 0; min-width: 160px; max-width: 160px; }
+    .sticky-col-2 { left: 160px; min-width: 64px; max-width: 64px; }
+    .sticky-col-3 { left: 224px; min-width: 88px; max-width: 88px; box-shadow: 4px 0 8px rgba(0, 0, 0, 0.08); }"""
 
     return f"""
     :root {{
-      --bg: #2c242a;
-      --panel: #382e34;
-      --panel-2: #43363e;
-      --border: #5e4650;
-      --text: #ffffff;
-      --muted: #e3d4d8;
-      --text-strong: #ffffff;
-      --text-driver: #ffffff;
-      --text-driver-live: #fff4c8;
-      --text-body: #ffffff;
-      --text-faint: #ecdfe2;
-      --text-lap: #ffffff;
-      --text-slot: #cfe2ff;
+      --bg: #ffffff;
+      --panel: #f8fafc;
+      --panel-2: #f1f5f9;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #64748b;
+      --text-strong: #0f172a;
+      --text-driver: #0f172a;
+      --text-driver-live: #7f1d1d;
+      --text-body: #1e293b;
+      --text-faint: #64748b;
+      --text-lap: #0f172a;
+      --text-slot: #1d4ed8;
       --accent: #e10600;
-      --accent-soft: #ff4d5a;
-      --accent-glow: rgba(225, 6, 0, 0.28);
-      --class: #ff8a8a;
-      --best: #fff0c8;
-      --live: rgba(225, 6, 0, 0.14);
-      --team: rgba(225, 6, 0, 0.22);
+      --accent-soft: #dc2626;
+      --accent-glow: rgba(225, 6, 0, 0.12);
+      --class: #b91c1c;
+      --best: #92400e;
+      --live: rgba(225, 6, 0, 0.07);
+      --team: rgba(225, 6, 0, 0.12);
       --page-font: calc(0.92rem + 3pt);
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
       font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
-      background:
-        radial-gradient(circle at top right, rgba(225, 6, 0, 0.12), transparent 28%),
-        linear-gradient(180deg, #352a32 0%, var(--bg) 100%);
+      background: #f8fafc;
       color: var(--text);
       min-height: 100vh;
     }}
@@ -1208,13 +1183,7 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       background-image: url("{TEAM_BANNER_ASSET}");
       background-size: cover;
       background-position: center;
-      opacity: 0.34;
-    }}
-    .hero-banner::after {{
-      content: "";
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(90deg, rgba(44, 36, 42, 0.94) 0%, rgba(44, 36, 42, 0.68) 45%, rgba(44, 36, 42, 0.86) 100%);
+      opacity: 0.08;
     }}
     .hero-inner {{
       position: relative;
@@ -1229,8 +1198,8 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       width: 52px;
       height: 52px;
       border-radius: 10px;
-      border: 2px solid rgba(255, 255, 255, 0.14);
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+      border: 2px solid #e2e8f0;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10);
       object-fit: cover;
       background: #fff;
       flex: 0 0 auto;
@@ -1259,7 +1228,7 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
     }}
     .eyebrow {{
       margin: 0;
-      color: #ff9f9f;
+      color: #b91c1c;
       font-size: 0.72rem;
       font-weight: 700;
       letter-spacing: 0.06em;
@@ -1295,7 +1264,7 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
     .meta-item:not(:last-child)::after {{
       content: "|";
       margin-left: 12px;
-      color: rgba(255, 255, 255, 0.18);
+      color: #cbd5e1;
     }}
     .status {{
       display: inline-block;
@@ -1306,20 +1275,20 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       white-space: nowrap;
       flex: 0 0 auto;
     }}
-    .status-live {{ background: rgba(225, 6, 0, 0.22); color: #ffb3b3; }}
-    .status-wait {{ background: rgba(255, 180, 0, 0.15); color: #ffd166; }}
+    .status-live {{ background: rgba(225, 6, 0, 0.10); color: #991b1b; }}
+    .status-wait {{ background: rgba(234, 179, 8, 0.12); color: #854d0e; }}
     .x-link {{
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      color: #ffb4b4;
+      color: #b91c1c;
       text-decoration: none;
       font-size: 0.78rem;
       font-weight: 700;
       white-space: nowrap;
       flex: 0 0 auto;
     }}
-    .x-link:hover {{ color: #fff; }}
+    .x-link:hover {{ color: #7f1d1d; }}
     .toolbar {{
       display: flex;
       gap: 12px;
@@ -1331,7 +1300,7 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       padding: 10px 14px;
       border-radius: 8px;
       border: 1px solid var(--border);
-      background: var(--panel);
+      background: #ffffff;
       color: var(--text);
       font-size: calc(1rem + 2pt);
     }}
@@ -1339,20 +1308,20 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
     .toolbar input {{ flex: 1; min-width: 220px; }}
     .toolbar .info {{ color: var(--muted); font-size: calc(0.9rem + 2pt); }}
     .nav-link {{
-      color: #ffb4b4;
+      color: #b91c1c;
       text-decoration: none;
       padding: 10px 14px;
       border: 1px solid var(--border);
       border-radius: 8px;
       white-space: nowrap;
-      background: rgba(225, 6, 0, 0.08);
+      background: rgba(225, 6, 0, 0.06);
     }}
-    .nav-link:hover {{ background: rgba(225, 6, 0, 0.18); }}
+    .nav-link:hover {{ background: rgba(225, 6, 0, 0.12); color: #7f1d1d; }}
     .table-wrap {{
       overflow: auto;
       border: 1px solid var(--border);
       border-radius: 12px;
-      background: var(--panel);
+      background: #ffffff;
     }}
     table {{
       width: 100%;
@@ -1371,21 +1340,21 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
     th {{
       position: sticky;
       top: 0;
-      background: #5a3640;
-      color: #ffd7d7;
+      background: #f1f5f9;
+      color: #374151;
       font-size: calc(0.8rem + 2pt);
       letter-spacing: 0.04em;
       text-transform: uppercase;
       z-index: 2;
     }}
-    tr:hover {{ background: rgba(255, 255, 255, 0.03); }}
+    tr:hover {{ background: rgba(0, 0, 0, 0.025); }}
     tr.row-live {{ background: var(--live); }}
     tr.row-team {{ background: var(--team); box-shadow: inset 3px 0 0 var(--accent); }}
     .num {{ text-align: center; white-space: nowrap; color: var(--text-body); }}
     .car-no {{ font-weight: 800; color: var(--text-strong); }}
     .class-badge {{
       display: inline-block;
-      background: rgba(225, 6, 0, 0.18);
+      background: rgba(225, 6, 0, 0.10);
       color: var(--class);
       padding: 2px 8px;
       border-radius: 6px;
@@ -1401,7 +1370,6 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
     }}
     tr.row-live .driver {{
       color: var(--text-driver-live);
-      text-shadow: 0 0 14px rgba(255, 244, 200, 0.28);
     }}
     .driver-slot {{ color: var(--text-slot); font-weight: 700; }}
     .drivers {{ color: var(--muted); min-width: 160px; font-size: 0.9em; }}
@@ -1421,12 +1389,11 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
     .lap-best {{
       color: var(--best);
       font-weight: 800;
-      text-shadow: 0 0 10px rgba(255, 240, 200, 0.35);
     }}
     .current-badge {{
       display: inline-block;
-      background: rgba(225, 6, 0, 0.28);
-      color: #ffe0e0;
+      background: rgba(225, 6, 0, 0.10);
+      color: #991b1b;
       padding: 2px 8px;
       border-radius: 6px;
       font-size: 0.82rem;
@@ -1463,7 +1430,7 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       user-select: none;
     }}
     .lap-panel th.sortable:hover {{
-      color: #fff;
+      color: #1e293b;
     }}
     .lap-panel th.sortable .sort-icon {{
       margin-left: 4px;
@@ -1549,14 +1516,14 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
     .youtube-settings button {{
       border: 1px solid var(--border);
       border-radius: 8px;
-      background: rgba(225, 6, 0, 0.12);
-      color: #ffdddd;
+      background: rgba(225, 6, 0, 0.06);
+      color: #b91c1c;
       padding: 10px 14px;
       cursor: pointer;
     }}
     .youtube-settings button:hover {{
-      background: rgba(225, 6, 0, 0.22);
-      color: #fff;
+      background: rgba(225, 6, 0, 0.12);
+      color: #7f1d1d;
     }}
     .youtube-settings .summary {{
       margin-top: 8px;
@@ -1611,18 +1578,18 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       width: 100%;
       min-width: 0;
     }}
-    .cars-panel table tbody td:nth-child(1) {{ color: #ffd54a; }}
-    .cars-panel table tbody td:nth-child(2) {{ color: #b9a3ff; }}
-    .cars-panel table tbody td:nth-child(3) {{ color: #6fe3ff; }}
-    .cars-panel table tbody td:nth-child(5) {{ color: #ffb067; }}
-    .cars-panel table tbody td:nth-child(6) {{ color: #a7d98f; }}
+    .cars-panel table tbody td:nth-child(1) {{ color: #92400e; }}
+    .cars-panel table tbody td:nth-child(2) {{ color: #6d28d9; }}
+    .cars-panel table tbody td:nth-child(3) {{ color: #0369a1; }}
+    .cars-panel table tbody td:nth-child(5) {{ color: #c2410c; }}
+    .cars-panel table tbody td:nth-child(6) {{ color: #166534; }}
     .cars-panel table tbody td:nth-child(8),
     .cars-panel table tbody td:nth-child(9),
     .cars-panel table tbody td:nth-child(10),
-    .cars-panel table tbody td:nth-child(11) {{ color: #ffffff; }}
-    .cars-panel table tbody td:nth-child(12) {{ color: #7fb4ff; }}
-    .cars-panel table tbody td:nth-child(13) {{ color: #f4a3c4; }}
-    .cars-panel table tbody td:nth-child(14) {{ color: #6fe0c8; }}
+    .cars-panel table tbody td:nth-child(11) {{ color: #1e293b; }}
+    .cars-panel table tbody td:nth-child(12) {{ color: #1d4ed8; }}
+    .cars-panel table tbody td:nth-child(13) {{ color: #be185d; }}
+    .cars-panel table tbody td:nth-child(14) {{ color: #0f766e; }}
     .main-split.layout-horizontal .data-panel #tableWrap,
     .main-split.layout-vertical .data-panel #tableWrap {{
       max-height: calc(100vh - 240px);
@@ -1640,11 +1607,11 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       height: calc(100vh - 32px);
       max-height: calc(100vh - 32px);
       z-index: 50;
-      box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
     }}
     .lap-column.dragging {{
       user-select: none;
-      box-shadow: 0 18px 56px rgba(0, 0, 0, 0.6);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
     }}
     @media (max-width: 1100px) {{
       .lap-column {{
@@ -1682,28 +1649,28 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       border: 1px solid var(--border);
       border-radius: 6px;
       background: transparent;
-      color: #ffb4b4;
+      color: #b91c1c;
       font-size: 0.78rem;
       line-height: 1;
       padding: 3px 7px;
       cursor: pointer;
     }}
     .lap-col-reset:hover {{
-      background: rgba(225, 6, 0, 0.16);
-      color: #fff;
+      background: rgba(225, 6, 0, 0.08);
+      color: #7f1d1d;
     }}
     .lap-group-btn.hidden {{
       display: none;
     }}
     .lap-group-btn.active {{
-      background: rgba(225, 6, 0, 0.3);
+      background: rgba(225, 6, 0, 0.12);
       border-color: var(--accent-soft);
-      color: #fff;
+      color: #7f1d1d;
       font-weight: 700;
     }}
     .lap-group-row td {{
-      background: #4a3a42;
-      color: var(--text-driver);
+      background: #f1f5f9;
+      color: #374151;
       font-weight: 800;
       letter-spacing: 0.02em;
       border-bottom: 1px solid var(--border);
@@ -1740,9 +1707,9 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       cursor: pointer;
     }}
     .lap-filter-pills button.active {{
-      background: rgba(225, 6, 0, 0.28);
+      background: rgba(225, 6, 0, 0.10);
       border-color: var(--accent-soft);
-      color: #fff;
+      color: #7f1d1d;
       font-weight: 700;
     }}
     .lap-column th.sortable {{
@@ -1750,7 +1717,7 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       user-select: none;
     }}
     .lap-column th.sortable:hover {{
-      color: #fff;
+      color: #1e293b;
     }}
     .lap-column th.sortable .sort-icon {{
       margin-left: 4px;
@@ -1802,15 +1769,15 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       border: 1px solid var(--border);
       border-radius: 999px;
       background: transparent;
-      color: #ffb4b4;
+      color: #b91c1c;
       font-size: 0.72rem;
       padding: 3px 12px;
       cursor: pointer;
       transition: background 0.15s ease, color 0.15s ease;
     }}
     .driver-clear-btn:hover {{
-      background: rgba(225, 6, 0, 0.16);
-      color: #fff;
+      background: rgba(225, 6, 0, 0.08);
+      color: #7f1d1d;
     }}
     .driver-checkboxes {{
       display: flex;
@@ -1824,7 +1791,7 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       width: 8px;
     }}
     .driver-checkboxes::-webkit-scrollbar-thumb {{
-      background: rgba(255, 255, 255, 0.12);
+      background: rgba(0, 0, 0, 0.12);
       border-radius: 999px;
     }}
     .driver-checkboxes label {{
@@ -1848,11 +1815,10 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
       color: var(--text-strong);
     }}
     .driver-checkboxes label:has(input:checked) {{
-      background: rgba(225, 6, 0, 0.28);
+      background: rgba(225, 6, 0, 0.10);
       border-color: var(--accent-soft);
-      color: #fff;
+      color: #7f1d1d;
       font-weight: 700;
-      box-shadow: 0 0 10px rgba(225, 6, 0, 0.22);
     }}
     .driver-checkboxes input {{
       position: absolute;
@@ -1864,7 +1830,7 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
     .driver-pickable {{
       cursor: pointer;
       text-decoration: underline dotted;
-      text-decoration-color: rgba(255, 216, 154, 0.45);
+      text-decoration-color: rgba(225, 6, 0, 0.30);
       text-underline-offset: 3px;
     }}
     .driver-pickable:hover {{
@@ -1874,17 +1840,17 @@ def dashboard_theme_css(*, drivers_page: bool = False, index_page: bool = False)
 
 def dashboard_header_html(page_title: str) -> str:
     return f"""
-    <div class="header hero">
+    <div class="header hero relative overflow-hidden rounded-xl border border-slate-200 mb-3 bg-white shadow-sm">
       <div class="hero-banner"></div>
-      <div class="hero-inner">
-        <img class="team-logo" src="{html.escape(TEAM_LOGO_ASSET)}" alt="{html.escape(TEAM_NAME)}">
-        <div class="hero-main">
-          <div class="hero-head">
+      <div class="hero-inner relative z-10 flex items-center gap-4 px-4 py-3 flex-wrap">
+        <img class="team-logo w-[52px] h-[52px] rounded-xl border-2 border-slate-200 shadow-sm object-cover bg-white shrink-0" src="{html.escape(TEAM_LOGO_ASSET)}" alt="{html.escape(TEAM_NAME)}">
+        <div class="hero-main flex-1 min-w-0 flex items-center gap-x-5 gap-y-2 flex-wrap">
+          <div class="hero-head flex items-baseline gap-x-3 gap-y-1 flex-wrap shrink-0 min-w-0">
             <p class="eyebrow">#821 / #822 ST-5F</p>
-            <h1>{html.escape(page_title)}</h1>
+            <h1 class="m-0 text-lg font-bold leading-tight whitespace-nowrap text-slate-900">{html.escape(page_title)}</h1>
             <p class="tagline">{html.escape(TEAM_TAGLINE)}</p>
           </div>
-          <div class="hero-meta-row">
+          <div class="hero-meta-row flex items-center gap-3 flex-wrap flex-1 min-w-0 justify-end">
             <div class="meta" id="metaBox">読み込み中...</div>
             <span class="status status-wait" id="statusBadge">更新待ち</span>
             <a class="x-link" href="{html.escape(TEAM_X_URL)}" target="_blank" rel="noopener">@AndLegal_Racing</a>
@@ -1926,12 +1892,25 @@ def save_html_file(
     html_path = output_dir / "index.html"
     data_url = view_data_path(output_dir).name
 
+    tailwind_asset = "../assets/tailwind.min.js"
     page = f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{html.escape(TEAM_NAME)} | ライブタイミング</title>
+  <script src="{html.escape(tailwind_asset)}"></script>
+  <script>
+    tailwind.config = {{
+      theme: {{
+        extend: {{
+          colors: {{
+            accent: '#e10600',
+          }}
+        }}
+      }}
+    }}
+  </script>
   <style>{dashboard_theme_css(index_page=True)}</style>
 </head>
 <body>
@@ -2690,12 +2669,25 @@ def save_drivers_html(
     html_path = output_dir / "drivers.html"
     data_url = view_data_path(output_dir).name
 
+    tailwind_asset = "../assets/tailwind.min.js"
     page = f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{html.escape(TEAM_NAME)} | ドライバー一覧</title>
+  <script src="{html.escape(tailwind_asset)}"></script>
+  <script>
+    tailwind.config = {{
+      theme: {{
+        extend: {{
+          colors: {{
+            accent: '#e10600',
+          }}
+        }}
+      }}
+    }}
+  </script>
   <style>{dashboard_theme_css(drivers_page=True)}</style>
 </head>
 <body>
